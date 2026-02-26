@@ -612,6 +612,25 @@ collect_install_input() {
     read -rp "$(echo -e "${BOLD}Install Grafana monitoring stack? [y/N]${NC}: ")" mon_choice
     [[ "$mon_choice" =~ ^[Yy]$ ]] && MONITORING="true" || MONITORING="false"
 
+    # 13. Monitoring remote access
+    TAILSCALE="false"
+    TAILSCALE_AUTHKEY=""
+    if [ "$MONITORING" = "true" ]; then
+        echo ""
+        echo -e "${BOLD}Grafana remote access:${NC}"
+        echo "  1) SSH tunnel only (default)"
+        echo "  2) Tailscale (no domain needed, recommended)"
+        echo "  3) Skip"
+        local access_choice
+        read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" access_choice
+        if [ "$access_choice" = "2" ]; then
+            TAILSCALE="true"
+            echo ""
+            echo -e "  Get auth key: ${BLUE}https://login.tailscale.com/admin/settings/keys${NC}"
+            prompt TAILSCALE_AUTHKEY "Auth key (tskey-auth-..., or empty for browser auth)" ""
+        fi
+    fi
+
     # 13. Cloudflare tunnel
     echo ""
     local cf_choice
@@ -639,6 +658,7 @@ collect_install_input() {
     echo "  Auto-upgrade: $AUTO_UPGRADE"
     echo "  Monitoring:   $MONITORING"
     echo "  CF Tunnel:    $CLOUDFLARE_TUNNEL"
+    echo "  Tailscale:    $TAILSCALE"
     echo ""
     local confirm
     read -rp "$(echo -e "${BOLD}Proceed with installation? [y/N]${NC}: ")" confirm
@@ -663,6 +683,7 @@ mode_install() {
     wait_healthy || true
     setup_cron
     install_monitoring
+    install_tailscale
     install_cloudflare
     send_telegram "✅ <b>${NODE_NAME}</b>%0A%0ACanton ${VERSION} installed on $(hostname)%0ANetwork: ${NETWORK}%0AParty: ${PARTY_HINT}"
     print_access_info "$VERSION"
@@ -1118,6 +1139,8 @@ AUTO_UPGRADE=${AUTO_UPGRADE:-false}
 MONITORING=${MONITORING}
 CLOUDFLARE_TUNNEL=${CLOUDFLARE_TUNNEL}
 CLOUDFLARE_DOMAIN=${CLOUDFLARE_DOMAIN:-}
+TAILSCALE=${TAILSCALE:-false}
+TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY:-}
 CANTON_NETWORK_NAME=${CANTON_NETWORK_NAME:-splice-validator}
 AUTO_RESTART=true
 WAIT_HOURS=12
@@ -1248,6 +1271,56 @@ install_monitoring() {
     CANTON_NETWORK_NAME="$net_name" docker compose up -d
     success "Monitoring started — Grafana: http://127.0.0.1:3001 (admin/admin)"
 }
+# ============================================================
+# Install Tailscale
+# ============================================================
+install_tailscale() {
+    [ "${TAILSCALE:-false}" != "true" ] && return 0
+
+    log "Installing Tailscale..."
+    if ! command -v tailscale &>/dev/null; then
+        curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1 || {
+            warn "Tailscale install failed — install manually: curl -fsSL https://tailscale.com/install.sh | sh"
+            return 0
+        }
+    fi
+    success "Tailscale installed"
+
+    local ts_ip=""
+    if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+        log "Connecting to Tailscale with auth key..."
+        sudo tailscale up --authkey="$TAILSCALE_AUTHKEY" --accept-routes >/dev/null 2>&1 && {
+            sleep 3
+            ts_ip=$(tailscale ip -4 2>/dev/null || echo "")
+            [ -n "$ts_ip" ] && success "Tailscale connected: $ts_ip"
+        } || warn "tailscale up failed — run manually: sudo tailscale up"
+    else
+        log "Starting Tailscale — browser authorization required..."
+        local auth_url
+        auth_url=$(sudo tailscale up --accept-routes 2>&1 | grep -oP 'https://login\.tailscale\.com/\S+' | head -1 || echo "")
+        echo ""
+        if [ -n "$auth_url" ]; then
+            echo -e "  ${BOLD}Authorize Tailscale in your browser:${NC}"
+            echo -e "  ${BLUE}${auth_url}${NC}"
+        else
+            echo -e "  ${BOLD}Run:${NC} sudo tailscale up"
+            echo -e "  Then open the URL shown in your browser."
+        fi
+        echo ""
+        echo -e "  After authorization: ${BOLD}http://<tailscale-ip>:3001${NC}"
+        echo -e "  Get your Tailscale IP: tailscale ip -4"
+        warn "Complete browser auth to access Grafana via Tailscale"
+        return 0
+    fi
+
+    if [ -n "$ts_ip" ]; then
+        echo ""
+        echo -e "  ${GREEN}${BOLD}Grafana via Tailscale:${NC}  http://${ts_ip}:3001"
+        echo -e "  Install Tailscale on your device: ${BLUE}https://tailscale.com/download${NC}"
+        grep -q "^TAILSCALE_IP=" "$TOOLKIT_CONF" 2>/dev/null             && sed -i "s|^TAILSCALE_IP=.*|TAILSCALE_IP=${ts_ip}|" "$TOOLKIT_CONF"             || echo "TAILSCALE_IP=${ts_ip}" >> "$TOOLKIT_CONF"
+    fi
+}
+
 
 # ============================================================
 # Install Cloudflare tunnel
