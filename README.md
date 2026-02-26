@@ -62,7 +62,8 @@ The installer will ask you:
 8. Telegram alerts (bot token + chat ID)
 9. Auto-upgrade: yes/no (default: **no**)
 10. Grafana monitoring stack: yes/no
-11. Cloudflare Tunnel for wallet: yes/no
+11. Grafana remote access: SSH tunnel / Tailscale / skip
+12. Cloudflare Tunnel for wallet: yes/no
 
 After install, everything is configured and running. Config saved to `~/.canton/toolkit.conf`.
 
@@ -178,7 +179,10 @@ CANTON_NETWORK_NAME=splice-validator docker compose up -d
 
 `CANTON_NETWORK_NAME` must match your validator's Docker Compose project name. Default is `splice-validator`. If your containers are named `splice-devnet-*`, use `splice-devnet`. `setup.sh` detects this automatically.
 
-- Grafana: `http://127.0.0.1:3001` (admin / admin)
+**Access options:**
+- SSH tunnel: `ssh -L 3001:127.0.0.1:3001 user@server -N` → `http://127.0.0.1:3001`
+- Tailscale: enable during setup → Grafana available at `http://<tailscale-ip>:3001` from any device on your Tailscale network, no tunnel needed
+
 - Prometheus: `http://127.0.0.1:9091`
 
 ![Canton Validator Dashboard](docs/img/dashboard-overview.png)
@@ -251,50 +255,3 @@ One Telegram alert on failure, one on recovery — no spam.
 **docker-proxy `-use-listen-fd`** — on some Ubuntu versions port listens but doesn't accept connections after restart. Fix: `docker compose down && docker compose up -d` (not `docker restart`).
 
 **Official Grafana dashboards** from the Canton bundle use `namespace` label (Kubernetes only). This toolkit's dashboard uses `job` and `node_name` labels which work in docker-compose.
-
----
-
-## TBD — Advanced
-
-> Planned extensions for validators who want to go beyond basic operations.
-
-### Custom API layer
-Expose a read-only REST API on top of the Canton Wallet API and Scan API — useful for integrating with external dashboards, bots, or notification systems without giving direct access to the validator.
-
-### Indexer / Explorer backend
-Canton transactions and ACS data indexed to PostgreSQL or ClickHouse for fast querying. Foundation for building a self-hosted explorer, analytics, or reward tracking tool.
-
-### Reward tracker
-Track `ReceiveFaucetCouponTrigger` completions over time, calculate daily/weekly reward trends, export to CSV or push to Grafana as a custom datasource.
-
-### Multi-validator management
-Single control plane for managing multiple validators across MainNet / TestNet / DevNet from one host. Shared monitoring stack, unified alerting.
-
-### Alerting integrations
-PagerDuty, OpsGenie, Slack — beyond Telegram. Pluggable contact points via Grafana alerting.
-
-### Automated migration tooling
-When a major migration is required (migration ID bump), guide the operator step-by-step: backup → stop → reconfigure → onboard → verify. Reduce manual steps to near zero.
-
----
-
-## Docs
-
-- [Quick Start](docs/quickstart.md)
-- [Backup](docs/backup.md)
-- [Monitoring](docs/monitoring.md)
-- [Wallet Access](docs/wallet-access.md)
-
----
-
-## Links
-
-- [Canton Network docs](https://docs.sync.global/)
-- [Canton GitHub releases](https://github.com/digital-asset/decentralized-canton-sync/releases)
-- [MainNet explorer](https://lighthouse.cantonloop.com/)
-- [TestNet explorer](https://lighthouse.testnet.cantonloop.com/)
-- [DevNet explorer](https://lighthouse.devnet.cantonloop.com/)
-
----
-
-Built by [web34ever](https://web34ever.com)

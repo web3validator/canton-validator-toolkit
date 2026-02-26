@@ -28,7 +28,7 @@ docker ps | grep canton-
 | Component | Port | Description |
 |-----------|------|-------------|
 | Prometheus | `127.0.0.1:9091` | Metrics collection + storage |
-| Grafana | `127.0.0.1:3001` | Dashboards + alerting |
+| Grafana | `127.0.0.1:3001` (or Tailscale IP) | Dashboards + alerting |
 | node-exporter | `127.0.0.1:9101` | System metrics (CPU / RAM / disk / network) |
 
 All ports bound to `127.0.0.1` only — never exposed publicly. Access via SSH tunnel.
@@ -39,13 +39,36 @@ All ports bound to `127.0.0.1` only — never exposed publicly. Access via SSH t
 
 ## Access
 
-```bash
-# On your local machine:
-ssh -L 3001:127.0.0.1:3001 -L 9091:127.0.0.1:9091 user@your-server -N
+### SSH tunnel
 
+```bash
+ssh -L 3001:127.0.0.1:3001 -L 9091:127.0.0.1:9091 user@your-server -N
 # Grafana:    http://127.0.0.1:3001  (admin / admin)
 # Prometheus: http://127.0.0.1:9091
 ```
+
+### Tailscale (recommended)
+
+Enable during setup when asked about Grafana remote access, or set up manually:
+
+```bash
+# On the validator server:
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+# Open the URL shown, authorize in browser
+
+# Get your Tailscale IP:
+tailscale ip -4
+
+# Restart monitoring with Tailscale IP binding:
+cd ~/canton-validator-toolkit/monitoring
+CANTON_NETWORK_NAME=splice-validator MONITOR_BIND_IP=<tailscale-ip> docker compose up -d
+```
+
+Then install Tailscale on your laptop/phone from [tailscale.com/download](https://tailscale.com/download) and open:
+`http://<tailscale-ip>:3001`
+
+No SSH tunnel needed. Works from mobile, works from anywhere on your Tailscale network.
 
 Change Grafana password after first login: Profile → Change Password.
 

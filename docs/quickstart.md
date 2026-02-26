@@ -58,6 +58,7 @@ Choose `1` for fresh install. You'll be asked:
 | Telegram | optional | bot token + chat ID |
 | Auto-upgrade | `n` | disabled by default |
 | Monitoring | `y` | Prometheus + Grafana |
+| Grafana access | `Tailscale` | SSH tunnel / Tailscale / skip |
 | Cloudflare Tunnel | `n` | optional remote wallet access |
 
 ---
@@ -86,6 +87,13 @@ You should see `validator`, `participant`, `postgres`, `nginx` containers — al
 ssh -L 8888:127.0.0.1:8888 user@your-server -N &
 # Then open: http://wallet.localhost:8888
 # Login: validator / <your password>
+```
+
+**Access Grafana (if Tailscale enabled):**
+
+```bash
+# No tunnel needed — open directly:
+http://<tailscale-ip>:3001
 ```
 
 ---

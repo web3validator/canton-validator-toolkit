@@ -164,15 +164,3 @@ source ~/.canton/toolkit.conf
 ```bash
 tail -f ~/.canton/logs/backup.log
 ```
-
----
-
-## TBD — Advanced
-
-**Encrypted backups** — GPG-encrypt dumps before upload. Required if using a shared or untrusted backup destination.
-
-**S3-compatible targets** — rclone supports AWS S3, Backblaze B2, Storj, and others. Extending backup.sh to support any rclone remote is straightforward once the rclone config is in place.
-
-**Point-in-time recovery** — WAL archiving for PostgreSQL to enable restore to any point in time, not just the last snapshot. Useful for catching corruption or accidental data loss between backup intervals.
-
-**Backup health monitoring** — Grafana panel showing last successful backup timestamp. Alert if no backup in >6h.
