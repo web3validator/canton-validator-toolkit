@@ -44,8 +44,8 @@ get_token_script() {
         return
     fi
 
-    # Fallback: find latest version dir
-    token_script=$(find "$CANTON_DIR" -maxdepth 4 -name "get-token.py" 2>/dev/null \
+    # Fallback: find latest version dir (search up to depth 6 for non-standard layouts)
+    token_script=$(find "$CANTON_DIR" -maxdepth 6 -name "get-token.py" 2>/dev/null \
         | sort -V | tail -1)
     [ -n "$token_script" ] && echo "$token_script" && return
 
@@ -74,7 +74,12 @@ api_get() {
     local endpoint="$1"
     local token="$2"
 
-    curl -sf \
+    curl -s --fail-with-body \
+        -H "Authorization: Bearer $token" \
+        -H "Host: $WALLET_HOST" \
+        -H "Content-Type: application/json" \
+        "${WALLET_BASE}${endpoint}" 2>/dev/null || \
+    curl -s \
         -H "Authorization: Bearer $token" \
         -H "Host: $WALLET_HOST" \
         -H "Content-Type: application/json" \
@@ -86,7 +91,7 @@ api_post() {
     local token="$2"
     local body="$3"
 
-    curl -sf -X POST \
+    curl -s -X POST \
         -H "Authorization: Bearer $token" \
         -H "Host: $WALLET_HOST" \
         -H "Content-Type: application/json" \
@@ -168,7 +173,7 @@ print(json.dumps({
 
     local contract_id
     contract_id=$(echo "$result" | python3 -c \
-        "import sys,json; d=json.load(sys.stdin); print(d.get('transfer_offer_cid', d.get('contract_id','?')))" \
+        "import sys,json; d=json.load(sys.stdin); print(d.get('offer_contract_id', d.get('transfer_offer_cid', d.get('contract_id','?'))))" \
         2>/dev/null || echo "?")
 
     echo ""
@@ -192,37 +197,28 @@ cmd_history() {
             *) die "Unknown argument: $1" ;;
         esac
     done
-
     log "Fetching last $limit transactions..."
-    local token
+    local token result
     token=$(get_token)
-
-    local result
-    result=$(api_post "/api/validator/v0/wallet/transactions" "$token" "{\"page_size\": $limit}") \
-        || die "Cannot fetch transactions"
-
+    result=$(api_post "/api/validator/v0/wallet/transactions" "$token" "{\"page_size\": $limit}")
+    [ -z "$result" ] && die "Cannot fetch transactions — is Canton running?"
     echo ""
-    echo "$result" | python3 - <<'PYEOF'
+    echo "$result" | python3 -c "
 import sys, json
-
-data = json.load(sys.stdin)
-txs = data.get('items', data) if isinstance(data, dict) else data
-
+data = json.loads(sys.stdin.read())
+txs = data.get('items', []) if isinstance(data, dict) else []
 if not txs:
-    print("  No transactions found")
+    print('  No transactions found')
     sys.exit(0)
-
-for tx in txs[:]:
-    tx_type    = tx.get('transaction_type', tx.get('type', 'unknown'))
-    event_id   = tx.get('event_id', tx.get('transaction_id', '?'))[:20]
-    amount     = tx.get('amulet_price', tx.get('amount', '?'))
-    date_str   = tx.get('date', tx.get('recorded_at', '?'))
-    if len(date_str) > 19:
-        date_str = date_str[:19].replace('T', ' ')
-    print(f"  [{date_str}]  {tx_type:<30}  {str(amount):<12}  id:{event_id}...")
-
+for tx in txs:
+    tx_type  = tx.get('transaction_type', 'unknown')
+    event_id = tx.get('event_id', '?')[:20]
+    sender   = tx.get('sender') or {}
+    amount   = sender.get('amount', '?') if isinstance(sender, dict) else '?'
+    date_str = tx.get('date', '?')[:19].replace('T', ' ')
+    print(f'  [{date_str}]  {tx_type:<35}  {str(amount):<14}  id:{event_id}...')
 print()
-PYEOF
+"
 }
 
 # ============================================================
@@ -230,38 +226,30 @@ PYEOF
 # ============================================================
 cmd_offers() {
     log "Fetching pending transfer offers..."
-    local token
+    local token result
     token=$(get_token)
-
-    local result
-    result=$(api_get "/api/validator/v0/wallet/transfer-offers" "$token") \
-        || die "Cannot fetch transfer offers"
-
+    result=$(api_get "/api/validator/v0/wallet/transfer-offers" "$token")
+    [ -z "$result" ] && die "Cannot fetch transfer offers — is Canton running?"
     echo ""
-    echo "$result" | python3 - <<'PYEOF'
+    echo "$result" | python3 -c "
 import sys, json
-
-data = json.load(sys.stdin)
-offers = data.get('transfer_offers', data) if isinstance(data, dict) else data
-
+data = json.loads(sys.stdin.read())
+offers = data.get('offers', data.get('transfer_offers', [])) if isinstance(data, dict) else []
 if not offers:
-    print("  No pending transfer offers")
+    print('  No pending transfer offers')
     sys.exit(0)
-
 for o in offers:
-    sender   = o.get('sender', '?')[:40]
-    receiver = o.get('receiver', '?')[:40]
-    amount   = o.get('amount', '?')
-    desc     = o.get('description', '')
+    payload  = o.get('payload', o)
+    sender   = str(payload.get('sender', '?'))[:40]
+    receiver = str(payload.get('receiver', '?'))[:40]
+    amt      = payload.get('amount', {})
+    amount   = amt.get('amount', '?') if isinstance(amt, dict) else str(amt)
+    desc     = payload.get('description', '')
     cid      = o.get('contract_id', '?')[:20]
-    print(f"  {amount} CC  {sender}... → {receiver}...  '{desc}'  cid:{cid}...")
-
+    print(f'  {amount} CC  {sender}... -> {receiver}...  \"{desc}\"  cid:{cid}...')
 print()
-PYEOF
+"
 }
-
-# ============================================================
-# Usage
 # ============================================================
 usage() {
     echo ""
