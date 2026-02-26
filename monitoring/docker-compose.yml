@@ -1,0 +1,99 @@
+version: "3.8"
+
+# ============================================================
+# Canton Validator Toolkit — Monitoring Stack
+# Prometheus + Grafana + node-exporter
+#
+# All ports bound to 127.0.0.1 only.
+# Joins splice_validator docker network to reach
+# validator:10013 and participant:10013 directly.
+#
+# Start: docker compose up -d
+# Grafana: http://127.0.0.1:3001  (admin / admin)
+# Prometheus: http://127.0.0.1:9091
+# ============================================================
+
+networks:
+  monitoring:
+    driver: bridge
+  splice_validator:
+    external: true
+    name: ${CANTON_NETWORK_NAME:-splice-validator}_splice_validator
+
+
+
+services:
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: canton-prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--enable-feature=native-histograms"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9091:9090"
+
+    networks:
+      - monitoring
+      - splice_validator
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: canton-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/canton-validator.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3001:3000"
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: canton-node-exporter
+    restart: unless-stopped
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+      - "--web.listen-address=:9101"
+    volumes:
+      - /:/host:ro,rslave
+    ports:
+      - "127.0.0.1:9101:9101"
+    networks:
+      - monitoring
+    pid: host
+
+volumes:
+  prometheus_data:
+  grafana_data:

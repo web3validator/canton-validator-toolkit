@@ -1,0 +1,22 @@
+# Secrets and local config
+*.env
+.env*
+*.secret
+*.key
+*.pem
+
+# Runtime state
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo

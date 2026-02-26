@@ -1,0 +1,1070 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "bargauge",
+      "name": "Bar gauge",
+      "version": ""
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "description": "Canton Network Validator — full monitoring dashboard (28 panels)",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Overview",
+      "type": "row"
+    },
+
+    {
+      "id": 1,
+      "title": "CC Balance",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "text": { "valueSize": 32 }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 0 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "splice_wallet_unlocked_amulet_balance",
+          "legendFormat": "CC Balance",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 2,
+      "title": "Sync Lag",
+      "type": "gauge",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "max": 300,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "(time() * 1000 - max(splice_store_last_ingested_record_time_ms)) / 1000",
+          "legendFormat": "Lag",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 3,
+      "title": "Rewards Today",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "increase(splice_trigger_completed_total{trigger_name=\"ReceiveFaucetCouponTrigger\"}[24h])",
+          "legendFormat": "Rewards",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 4,
+      "title": "Retry Failures",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum(splice_retries_failures)",
+          "legendFormat": "Failures",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 5,
+      "title": "Version",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "fixed", "fixedColor": "text" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "text", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "target_info",
+          "legendFormat": "{{canton_version}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "title": "Rewards & Economics",
+      "type": "row"
+    },
+
+    {
+      "id": 6,
+      "title": "Reward Rate /h",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(splice_trigger_completed_total{trigger_name=\"ReceiveFaucetCouponTrigger\"}[1h]) * 3600",
+          "legendFormat": "rewards/h",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 7,
+      "title": "Balance History",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "splice_wallet_unlocked_amulet_balance",
+          "legendFormat": "CC Balance",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "id": 102,
+      "title": "Network Health",
+      "type": "row"
+    },
+
+    {
+      "id": 8,
+      "title": "Processing Lag ms",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30000 },
+              { "color": "red", "value": 60000 }
+            ]
+          },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "max(splice_store_last_seen_record_time_ms) - max(splice_store_last_ingested_record_time_ms)",
+          "legendFormat": "Processing lag",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 9,
+      "title": "TX Throughput",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(splice_history_updates_transactions_total[5m])",
+          "legendFormat": "tx/s",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 10,
+      "title": "gRPC Errors",
+      "type": "stat",
+      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "increase(daml_grpc_client_completed_total{grpc_code!=\"OK\"}[5m])",
+          "legendFormat": "gRPC errors",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 11,
+      "title": "Active Contracts by Store",
+      "type": "bargauge",
+      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "valueMode": "color",
+        "showUnfilled": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "splice_store_acs_size",
+          "legendFormat": "{{store_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
+      "id": 103,
+      "title": "Triggers",
+      "type": "row"
+    },
+
+    {
+      "id": 12,
+      "title": "All Triggers Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 22 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(splice_trigger_completed_total[5m])",
+          "legendFormat": "{{trigger_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 13,
+      "title": "Failed / Noop Triggers",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 22 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(splice_trigger_attempted_total[5m]) - rate(splice_trigger_completed_total{outcome=\"success\"}[5m])",
+          "legendFormat": "{{trigger_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 14,
+      "title": "Trigger Latency p95",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 22 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "histogram_quantile(0.95, rate(splice_trigger_latency_duration_seconds_bucket[5m]))",
+          "legendFormat": "{{trigger_name}} p95",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 },
+      "id": 104,
+      "title": "JVM",
+      "type": "row"
+    },
+
+    {
+      "id": 15,
+      "title": "Heap %",
+      "type": "gauge",
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 85 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum(jvm_memory_used_bytes{jvm_memory_type=\"heap\"}) / sum(jvm_memory_limit_bytes{jvm_memory_type=\"heap\"}) * 100",
+          "legendFormat": "Heap %",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 16,
+      "title": "JVM CPU %",
+      "type": "timeseries",
+      "gridPos": { "h": 5, "w": 8, "x": 4, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "jvm_cpu_recent_utilization_ratio * 100",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 17,
+      "title": "GC Time/s",
+      "type": "timeseries",
+      "gridPos": { "h": 5, "w": 8, "x": 12, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(jvm_gc_duration_seconds_sum[5m])",
+          "legendFormat": "{{job}} gc",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 18,
+      "title": "Threads",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "sparkline",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "text", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "jvm_thread_count",
+          "legendFormat": "{{job}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "id": 105,
+      "title": "Database",
+      "type": "row"
+    },
+
+    {
+      "id": 19,
+      "title": "DB Executor Load",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "cn_db_storage_general_executor_load",
+          "legendFormat": "{{job}} load",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 20,
+      "title": "DB Queue Depth",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "cn_db_storage_general_executor_queued",
+          "legendFormat": "{{job}} queued",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 21,
+      "title": "DB Pool %",
+      "type": "gauge",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "db_client_connections_usage / db_client_connections_max * 100",
+          "legendFormat": "DB Pool",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 22,
+      "title": "DB Exec Time/s",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 36 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(cn_db_storage_general_executor_exectime_duration_seconds_sum[5m])",
+          "legendFormat": "{{job}} exec",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "id": 106,
+      "title": "System",
+      "type": "row"
+    },
+
+    {
+      "id": 23,
+      "title": "CPU %",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "custom": { "lineWidth": 2, "fillOpacity": 15 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "100 - (avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100)",
+          "legendFormat": "CPU %",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 24,
+      "title": "RAM %",
+      "type": "gauge",
+      "gridPos": { "h": 7, "w": 4, "x": 8, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100",
+          "legendFormat": "RAM %",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 25,
+      "title": "Disk Free",
+      "type": "gauge",
+      "gridPos": { "h": 7, "w": 4, "x": 12, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 21474836480 },
+              { "color": "green", "value": 53687091200 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "node_filesystem_avail_bytes{mountpoint=\"/\"}",
+          "legendFormat": "Disk free",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 26,
+      "title": "Network In/Out",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 44 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(node_network_receive_bytes_total{device!~\"lo|veth.*\"}[5m])",
+          "legendFormat": "in {{device}}",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(node_network_transmit_bytes_total{device!~\"lo|veth.*\"}[5m])",
+          "legendFormat": "out {{device}}",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "id": 27,
+      "title": "Load Average",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 51 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "node_load1",
+          "legendFormat": "1m",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "node_load5",
+          "legendFormat": "5m",
+          "refId": "B"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "node_load15",
+          "legendFormat": "15m",
+          "refId": "C"
+        }
+      ]
+    },
+
+    {
+      "id": 28,
+      "title": "Disk I/O %",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 51 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(node_disk_io_time_seconds_total[5m])",
+          "legendFormat": "{{device}} I/O",
+          "refId": "A"
+        }
+      ]
+    }
+
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["canton", "validator", "posthuman"],
+  "templating": { "list": [] },
+  "time": { "from": "now-3h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Canton Validator",
+  "uid": "canton-validator-v1",
+  "version": 1
+}
