@@ -8,7 +8,7 @@
 # validator:10013 and participant:10013 directly.
 #
 # Start: docker compose up -d
-# Grafana: http://127.0.0.1:3001  (admin / admin)
+# Grafana: http://${MONITOR_BIND_IP:-127.0.0.1}:3001  (admin / admin)
 # Prometheus: http://127.0.0.1:9091
 # ============================================================
 
@@ -38,7 +38,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
-      - "127.0.0.1:9091:9090"
+      - "${MONITOR_BIND_IP:-127.0.0.1}:9091:9090"
 
     networks:
       - monitoring
@@ -66,7 +66,7 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
     ports:
-      - "127.0.0.1:3001:3000"
+      - "${MONITOR_BIND_IP:-127.0.0.1}:3001:3000"
     networks:
       - monitoring
     depends_on:
@@ -88,7 +88,7 @@ services:
     volumes:
       - /:/host:ro,rslave
     ports:
-      - "127.0.0.1:9101:9101"
+      - "${MONITOR_BIND_IP:-127.0.0.1}:9101:9101"
     networks:
       - monitoring
     pid: host
