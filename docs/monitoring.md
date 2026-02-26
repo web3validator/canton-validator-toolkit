@@ -241,3 +241,12 @@ docker compose down
 ```
 
 Data is preserved in Docker volumes (`prometheus_data`, `grafana_data`).
+---
+
+## Planned extensions
+
+**PagerDuty / Slack / OpsGenie** — pluggable contact points via Grafana alerting, beyond Telegram.
+
+**Reward tracker** — track `ReceiveFaucetCouponTrigger` completions over time, daily/weekly trends, CSV export.
+
+**Multi-validator view** — single Grafana instance monitoring multiple validators across MainNet / TestNet / DevNet.

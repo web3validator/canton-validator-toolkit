@@ -164,3 +164,15 @@ source ~/.canton/toolkit.conf
 ```bash
 tail -f ~/.canton/logs/backup.log
 ```
+
+---
+
+## Planned extensions
+
+**Encrypted backups** — GPG-encrypt dumps before upload. Needed if backup destination is shared or untrusted.
+
+**S3-compatible targets** — rclone supports AWS S3, Backblaze B2, Storj, and others. Any rclone remote works once the config is in place.
+
+**Point-in-time recovery** — WAL archiving for PostgreSQL, restore to any point in time between backup snapshots.
+
+**Backup health panel** — Grafana panel showing last successful backup timestamp, alert if no backup in >6h.

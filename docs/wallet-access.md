@@ -178,3 +178,13 @@ Or use the toolkit CLI:
 - JWT tokens use HS256 with secret `unsafe` — safe only because the port is never exposed
 - Cloudflare Tunnel creates outbound-only connections — no inbound ports opened on the server
 - For Cloudflare Zero Trust access control (email/Google/GitHub auth), configure an Access Application in the Cloudflare dashboard for `wallet.yourdomain.com`
+
+---
+
+## Planned extensions
+
+**Zero Trust policies** — restrict wallet access to specific emails or GitHub orgs via Cloudflare Access. No VPN, works from mobile.
+
+**Read-only API proxy** — expose balance and transaction history publicly with rate limiting and API key auth.
+
+**Hardware key (FIDO2)** — Cloudflare Access with hardware key requirement for wallet login from any device.
