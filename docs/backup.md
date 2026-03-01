@@ -23,7 +23,7 @@ All settings live in `~/.canton/toolkit.conf`. Set during install, edit anytime:
 
 ```
 BACKUP_TYPE=rsync          # rsync | r2 | skip
-REMOTE_HOST=ubuntu@142.132.158.158
+REMOTE_HOST=ubuntu@backup.example.com
 REMOTE_PATH=~/canton-backups/mainnet
 R2_BUCKET=
 R2_ACCOUNT_ID=
@@ -105,7 +105,7 @@ Output example:
 [2024-01-15 14:00:04] ✓ validator_20240115_140002.sql.gz — 45M
 [2024-01-15 14:00:04] Dumping participant DB (participant_0)...
 [2024-01-15 14:00:07] ✓ participant_0_20240115_140002.sql.gz — 120M
-[2024-01-15 14:00:07] Syncing to ubuntu@142.132.158.158:~/canton-backups/mainnet ...
+[2024-01-15 14:00:07] Syncing to ubuntu@backup.example.com:~/canton-backups/mainnet ...
 [2024-01-15 14:00:09] ✓ rsync upload complete
 [2024-01-15 14:00:09] ✓ Backup completed successfully
 ```
@@ -166,13 +166,3 @@ tail -f ~/.canton/logs/backup.log
 ```
 
 ---
-
-## Planned extensions
-
-**Encrypted backups** — GPG-encrypt dumps before upload. Needed if backup destination is shared or untrusted.
-
-**S3-compatible targets** — rclone supports AWS S3, Backblaze B2, Storj, and others. Any rclone remote works once the config is in place.
-
-**Point-in-time recovery** — WAL archiving for PostgreSQL, restore to any point in time between backup snapshots.
-
-**Backup health panel** — Grafana panel showing last successful backup timestamp, alert if no backup in >6h.

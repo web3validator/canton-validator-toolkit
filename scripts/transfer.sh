@@ -8,7 +8,7 @@ set -euo pipefail
 
 CANTON_DIR="$HOME/.canton"
 TOOLKIT_CONF="$CANTON_DIR/toolkit.conf"
-WALLET_BASE="http://127.0.0.1:8888"
+WALLET_BASE="http://localhost:8888"
 WALLET_HOST="wallet.localhost"
 
 log()   { echo "[$(date '+%H:%M:%S')] $1"; }

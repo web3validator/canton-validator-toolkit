@@ -115,12 +115,12 @@ check_sync_lag() {
     local metrics
     metrics=$(curl -sf --max-time 5 \
         -H "Host: validator.localhost" \
-        "http://127.0.0.1:8888/metrics" 2>/dev/null || echo "")
+        "http://localhost:8888/metrics" 2>/dev/null || echo "")
 
     if [ -z "$metrics" ]; then
         # Try direct container port
         metrics=$(curl -sf --max-time 5 \
-            "http://127.0.0.1:10013/metrics" 2>/dev/null || echo "")
+            "http://localhost:10013/metrics" 2>/dev/null || echo "")
     fi
 
     if [ -z "$metrics" ]; then

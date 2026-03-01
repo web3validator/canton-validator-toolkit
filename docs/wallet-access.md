@@ -1,6 +1,6 @@
 # Wallet Access
 
-The Canton wallet UI runs on port 8888, bound to `127.0.0.1` only. It is never exposed publicly. Two access methods are supported: SSH tunnel (default) and Cloudflare Tunnel (optional).
+The Canton wallet UI runs on port 8888, bound to `localhost` only. It is never exposed publicly. Two access methods are supported: SSH tunnel (default) and Cloudflare Tunnel (optional).
 
 ---
 
@@ -9,7 +9,7 @@ The Canton wallet UI runs on port 8888, bound to `127.0.0.1` only. It is never e
 Open a tunnel from your local machine to the server:
 
 ```bash
-ssh -L 8888:127.0.0.1:8888 user@your-server -N
+ssh -L 8888:localhost:8888 user@your-server -N
 ```
 
 Then open in browser:
@@ -28,9 +28,9 @@ Login: `validator` / `<your password>`
 To access wallet + monitoring in one tunnel:
 
 ```bash
-ssh -L 8888:127.0.0.1:8888 \
-    -L 3001:127.0.0.1:3001 \
-    -L 9091:127.0.0.1:9091 \
+ssh -L 8888:localhost:8888 \
+    -L 3001:localhost:3001 \
+    -L 9091:localhost:9091 \
     user@your-server -N
 ```
 
@@ -85,7 +85,7 @@ credentials-file: /home/<user>/.cloudflared/<tunnel-id>.json
 
 ingress:
   - hostname: wallet.yourdomain.com
-    service: http://127.0.0.1:8888
+    service: http://localhost:8888
     originRequest:
       httpHostHeader: wallet.localhost
   - service: http_status:404
@@ -158,7 +158,7 @@ TOKEN=$(python3 ~/.canton/current/splice-node/docker-compose/validator/get-token
 curl -s \
   -H "Authorization: Bearer $TOKEN" \
   -H "Host: wallet.localhost" \
-  http://127.0.0.1:8888/api/validator/v0/wallet/balance | jq .
+  http://localhost:8888/api/validator/v0/wallet/balance | jq .
 ```
 
 Or use the toolkit CLI:
@@ -173,18 +173,10 @@ Or use the toolkit CLI:
 
 ## Security notes
 
-- Port 8888 is always `127.0.0.1` only — this is enforced in `compose.yaml` by the toolkit
+- Port 8888 is always `localhost` only — this is enforced in `compose.yaml` by the toolkit
 - Basic auth password is hashed with APR1-MD5 via `openssl passwd -apr1` (no apache2-utils needed)
 - JWT tokens use HS256 with secret `unsafe` — safe only because the port is never exposed
 - Cloudflare Tunnel creates outbound-only connections — no inbound ports opened on the server
 - For Cloudflare Zero Trust access control (email/Google/GitHub auth), configure an Access Application in the Cloudflare dashboard for `wallet.yourdomain.com`
 
 ---
-
-## Planned extensions
-
-**Zero Trust policies** — restrict wallet access to specific emails or GitHub orgs via Cloudflare Access. No VPN, works from mobile.
-
-**Read-only API proxy** — expose balance and transaction history publicly with rate limiting and API key auth.
-
-**Hardware key (FIDO2)** — Cloudflare Access with hardware key requirement for wallet login from any device.

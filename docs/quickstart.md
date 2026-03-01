@@ -84,7 +84,7 @@ You should see `validator`, `participant`, `postgres`, `nginx` containers — al
 
 ```bash
 # On your local machine:
-ssh -L 8888:127.0.0.1:8888 user@your-server -N &
+ssh -L 8888:localhost:8888 user@your-server -N &
 # Then open: http://wallet.localhost:8888
 # Login: validator / <your password>
 ```

@@ -27,11 +27,11 @@ docker ps | grep canton-
 
 | Component | Port | Description |
 |-----------|------|-------------|
-| Prometheus | `127.0.0.1:9091` | Metrics collection + storage |
-| Grafana | `127.0.0.1:3001` (or Tailscale IP) | Dashboards + alerting |
-| node-exporter | `127.0.0.1:9101` | System metrics (CPU / RAM / disk / network) |
+| Prometheus | `localhost:9091` | Metrics collection + storage |
+| Grafana | `localhost:3001` (or Tailscale IP) | Dashboards + alerting |
+| node-exporter | `localhost:9101` | System metrics (CPU / RAM / disk / network) |
 
-All ports bound to `127.0.0.1` only — never exposed publicly. Access via SSH tunnel.
+All ports bound to `localhost` only — never exposed publicly. Access via SSH tunnel.
 
 > **Port 9101 for node-exporter** — deliberately not 9100. Port 9100 is commonly occupied by a system-level node-exporter installed outside Docker. Using 9101 avoids the conflict.
 
@@ -42,9 +42,9 @@ All ports bound to `127.0.0.1` only — never exposed publicly. Access via SSH t
 ### SSH tunnel
 
 ```bash
-ssh -L 3001:127.0.0.1:3001 -L 9091:127.0.0.1:9091 user@your-server -N
-# Grafana:    http://127.0.0.1:3001  (admin / admin)
-# Prometheus: http://127.0.0.1:9091
+ssh -L 3001:localhost:3001 -L 9091:localhost:9091 user@your-server -N
+# Grafana:    http://localhost:3001  (admin / admin)
+# Prometheus: http://localhost:9091
 ```
 
 ### Tailscale (recommended)
@@ -92,8 +92,6 @@ The `canton-validator` dashboard is provisioned automatically on startup.
 - **Rewards Today** — `ReceiveFaucetCouponTrigger` completions in the last 24h
 - **Retry Failures** — `splice_retries_failures` total (red if >0)
 - **Version** — from `target_info` metric
-
-![Canton Validator Dashboard — Rewards & Triggers](img/dashboard-rewards.png)
 
 ### Rewards & Economics
 - Reward rate per hour (time series)
@@ -158,7 +156,7 @@ Additionally, the dashboards define `namespace` as a required template variable 
 
 This toolkit's dashboard is built from scratch using only labels that are actually present in docker-compose metrics — primarily `job` (set in `prometheus.yml`) and `instance`. All 28 panels are verified to show real data on a live validator.
 
-The official dashboards can still be imported manually as a reference or for future Kubernetes deployments — they are not removed or replaced, just not used here.
+The official dashboards can still be imported manually as a reference — they are not removed or replaced, just not used here.
 
 ---
 
@@ -242,11 +240,3 @@ docker compose down
 
 Data is preserved in Docker volumes (`prometheus_data`, `grafana_data`).
 ---
-
-## Planned extensions
-
-**PagerDuty / Slack / OpsGenie** — pluggable contact points via Grafana alerting, beyond Telegram.
-
-**Reward tracker** — track `ReceiveFaucetCouponTrigger` completions over time, daily/weekly trends, CSV export.
-
-**Multi-validator view** — single Grafana instance monitoring multiple validators across MainNet / TestNet / DevNet.

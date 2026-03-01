@@ -287,7 +287,7 @@ patch_env() {
 }
 
 # ============================================================
-# Patch compose.yaml port (80 → 8888 on 127.0.0.1)
+# Patch compose.yaml port (80 → 8888, localhost-only bind)
 # ============================================================
 patch_compose() {
     local version="$1"

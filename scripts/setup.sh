@@ -1091,7 +1091,7 @@ write_htpasswd() {
 }
 
 # ============================================================
-# Patch compose.yaml (port 80 → 8888 on 127.0.0.1)
+# Patch compose.yaml (port 80 → 8888, localhost-only bind)
 # ============================================================
 patch_compose() {
     local validator_dir="$1"
@@ -1269,7 +1269,7 @@ install_monitoring() {
 
     cd "$TOOLKIT_DIR/monitoring"
     CANTON_NETWORK_NAME="$net_name" docker compose up -d
-    success "Monitoring started — Grafana: http://127.0.0.1:3001 (admin/admin)"
+    success "Monitoring started — Grafana: http://localhost:3001 (admin/admin)"
 }
 # ============================================================
 # Install Tailscale
@@ -1369,7 +1369,7 @@ print_access_info() {
     echo ""
     echo -e "${BOLD}Wallet access:${NC}"
     echo "  1. Open SSH tunnel:"
-    echo "     ssh -L 8888:127.0.0.1:8888 $(whoami)@$(hostname -I | awk '{print $1}') -N"
+    echo "     ssh -L 8888:localhost:8888 $(whoami)@$(hostname -I | awk '{print $1}') -N"
     echo "  2. Open in browser: http://wallet.localhost:8888"
     echo "  3. Login: validator / <your password>"
     echo ""

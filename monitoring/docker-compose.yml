@@ -3,13 +3,13 @@
 # Canton Validator Toolkit — Monitoring Stack
 # Prometheus + Grafana + node-exporter
 #
-# All ports bound to 127.0.0.1 only.
+# All ports bound to localhost only.
 # Joins splice_validator docker network to reach
 # validator:10013 and participant:10013 directly.
 #
 # Start: docker compose up -d
-# Grafana: http://${MONITOR_BIND_IP:-127.0.0.1}:3001  (admin / admin)
-# Prometheus: http://127.0.0.1:9091
+# Grafana: http://${MONITOR_BIND_IP:-localhost}:3001  (admin / admin)
+# Prometheus: http://localhost:9091
 # ============================================================
 
 networks:

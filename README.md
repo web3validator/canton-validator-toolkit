@@ -119,7 +119,7 @@ Canton bundles are installed to `~/.canton/<version>/` and never modified after 
 │       ├── .env
 │       ├── nginx.conf
 │       ├── nginx/.htpasswd
-│       └── compose.yaml   ← patched: port 8888, 127.0.0.1
+│       └── compose.yaml   ← patched: port 8888, localhost-only
 ├── current -> 0.5.10/     ← symlink, updated on each successful upgrade
 └── toolkit.conf           ← single config, survives all upgrades
 ```
@@ -130,12 +130,12 @@ Rolling back is as simple as starting the old version directory.
 
 ## Wallet access
 
-Port 8888 is bound to `127.0.0.1` only — never exposed publicly.
+Port 8888 is bound to `localhost` only — never exposed publicly.
 
 **Via SSH tunnel (default):**
 
 ```bash
-ssh -L 8888:127.0.0.1:8888 user@your-server -N
+ssh -L 8888:localhost:8888 user@your-server -N
 # Then open: http://wallet.localhost:8888
 # Login: validator / <your password>
 ```
@@ -180,10 +180,10 @@ CANTON_NETWORK_NAME=splice-validator docker compose up -d
 `CANTON_NETWORK_NAME` must match your validator's Docker Compose project name. Default is `splice-validator`. If your containers are named `splice-devnet-*`, use `splice-devnet`. `setup.sh` detects this automatically.
 
 **Access options:**
-- SSH tunnel: `ssh -L 3001:127.0.0.1:3001 user@server -N` → `http://127.0.0.1:3001`
+- SSH tunnel: `ssh -L 3001:localhost:3001 user@server -N` → `http://localhost:3001`
 - Tailscale: enable during setup → Grafana available at `http://<tailscale-ip>:3001` from any device on your Tailscale network, no tunnel needed
 
-- Prometheus: `http://127.0.0.1:9091`
+- Prometheus: `http://localhost:9091`
 
 ![Canton Validator Dashboard](docs/img/dashboard-overview.png)
 
