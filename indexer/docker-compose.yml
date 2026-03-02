@@ -1,0 +1,59 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: canton-indexer-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-canton_indexer}
+      POSTGRES_USER: ${DB_USER:-canton}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-canton}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-canton} -d ${DB_NAME:-canton_indexer}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  indexer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: canton-indexer
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CANTON_NETWORK: ${CANTON_NETWORK:-mainnet}
+      DATABASE_URL: postgres://${DB_USER:-canton}:${DB_PASSWORD:-canton}@postgres:5432/${DB_NAME:-canton_indexer}
+      PORT: ${PORT:-3000}
+      HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LIGHTHOUSE_URL: ${LIGHTHOUSE_URL:-}
+      LIGHTHOUSE_TIMEOUT_MS: ${LIGHTHOUSE_TIMEOUT_MS:-10000}
+      POLL_STATS_SEC: ${POLL_STATS_SEC:-60}
+      POLL_VALIDATORS_SEC: ${POLL_VALIDATORS_SEC:-300}
+      POLL_REWARDS_SEC: ${POLL_REWARDS_SEC:-900}
+      POLL_GOVERNANCE_SEC: ${POLL_GOVERNANCE_SEC:-1800}
+      POLL_SNAPSHOT_SEC: ${POLL_SNAPSHOT_SEC:-3600}
+      VALIDATOR_API_ENABLED: ${VALIDATOR_API_ENABLED:-false}
+      VALIDATOR_API_URL: ${VALIDATOR_API_URL:-}
+      VALIDATOR_JWT_TOKEN: ${VALIDATOR_JWT_TOKEN:-}
+      SCAN_API_ENABLED: ${SCAN_API_ENABLED:-false}
+      SCAN_API_URL: ${SCAN_API_URL:-}
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
