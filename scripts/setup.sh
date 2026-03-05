@@ -327,6 +327,126 @@ get_our_version() {
         | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
 
+# ============================================================
+# Detect existing validator installation (without toolkit.conf)
+# ============================================================
+detect_existing_validator() {
+    # Running container
+    local container
+    container=$(docker ps --format '{{.Names}}' 2>/dev/null \
+        | grep -E 'validator-1$' | grep -v postgres | head -1)
+    [ -n "$container" ] && return 0
+
+    # Bundle directory exists
+    local bundle
+    bundle=$(find "$HOME/.canton" -maxdepth 4 -name "compose.yaml" 2>/dev/null | head -1)
+    [ -n "$bundle" ] && return 0
+
+    return 1
+}
+
+# ============================================================
+# Import config for existing validator (no reinstall)
+# ============================================================
+import_existing_config() {
+    echo ""
+    echo -e "${BOLD}─── Import Existing Validator Config ────────────${NC}"
+    echo ""
+    echo -e "  This will create ${BOLD}toolkit.conf${NC} for your running validator."
+    echo -e "  ${GREEN}Nothing will be reinstalled or restarted.${NC}"
+    echo ""
+
+    # Try to auto-detect values from running containers / env files
+    local detected_version detected_network detected_party detected_sv detected_scan detected_migration
+
+    # Version from running container image
+    detected_version=$(docker ps --format '{{.Image}}' 2>/dev/null \
+        | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
+
+    # Try to find .env in bundle
+    local env_file
+    env_file=$(find "$HOME/.canton" -maxdepth 5 -name ".env" 2>/dev/null | head -1)
+    if [ -n "$env_file" ]; then
+        detected_party=$(grep  '^PARTY_HINT='      "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
+        detected_sv=$(grep     '^SPONSOR_SV_ADDRESS=' "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
+        detected_scan=$(grep   '^SCAN_ADDRESS='    "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
+        detected_migration=$(grep '^MIGRATION_ID=' "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
+    fi
+
+    # Detect network from SV URL
+    if echo "${detected_sv:-}" | grep -q '\.test\.'; then
+        detected_network="testnet"
+    elif echo "${detected_sv:-}" | grep -q '\.dev\.'; then
+        detected_network="devnet"
+    else
+        detected_network="mainnet"
+    fi
+
+    [ -n "$detected_version" ] && echo -e "  ${GREEN}Detected version  :${NC} $detected_version"
+    [ -n "$detected_network" ] && echo -e "  ${GREEN}Detected network  :${NC} $detected_network"
+    [ -n "$detected_party"   ] && echo -e "  ${GREEN}Detected party    :${NC} $detected_party"
+    echo ""
+
+    # Collect / confirm values
+    echo -e "${BOLD}Select network:${NC}"
+    echo "  1) mainnet"
+    echo "  2) testnet"
+    echo "  3) devnet"
+    local net_choice
+    read -rp "$(echo -e "${BOLD}Choice [1-3]${NC} [${detected_network:-mainnet}]: ")" net_choice
+    case "$net_choice" in
+        1) NETWORK="mainnet" ;;
+        2) NETWORK="testnet" ;;
+        3) NETWORK="devnet"  ;;
+        "") NETWORK="${detected_network:-mainnet}" ;;
+        *) NETWORK="${detected_network:-mainnet}" ;;
+    esac
+
+    prompt VERSION       "Canton version"   "${detected_version:-}"
+    prompt PARTY_HINT    "Party hint"        "${detected_party:-}"
+    prompt MIGRATION_ID  "Migration ID"      "${detected_migration:-4}"
+    prompt SV_URL        "SV URL"            "${detected_sv:-}"
+    prompt SCAN_URL      "Scan URL"          "${detected_scan:-}"
+    prompt NODE_NAME     "Node name (for alerts)" "${PARTY_HINT}-${NETWORK}"
+
+    # Backup
+    BACKUP_TYPE="skip"
+    REMOTE_HOST=""; REMOTE_PATH=""
+    R2_BUCKET=""; R2_ACCOUNT_ID=""; R2_ACCESS_KEY=""; R2_SECRET_KEY=""
+    RETENTION_DAYS="1"
+
+    # Telegram
+    local tg_choice
+    read -rp "$(echo -e "${BOLD}Configure Telegram alerts? [y/N]${NC}: ")" tg_choice
+    if [[ "$tg_choice" =~ ^[Yy]$ ]]; then
+        prompt TELEGRAM_BOT_TOKEN "Bot token" ""
+        prompt TELEGRAM_CHAT_ID   "Chat ID"   ""
+    else
+        TELEGRAM_BOT_TOKEN=""; TELEGRAM_CHAT_ID=""
+    fi
+    DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+    SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
+    PAGERDUTY_ROUTING_KEY="${PAGERDUTY_ROUTING_KEY:-}"
+
+    AUTO_UPGRADE="false"
+    MONITORING="false"
+    CLOUDFLARE_TUNNEL="false"; CLOUDFLARE_DOMAIN=""
+    TAILSCALE="false"; TAILSCALE_AUTHKEY=""
+    ONBOARDING_SECRET=""
+    CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}"
+
+    mkdir -p "$CANTON_DIR" "$LOG_DIR"
+    save_toolkit_conf "${VERSION:-unknown}"
+
+    echo ""
+    success "toolkit.conf created — validator not touched"
+    echo ""
+    echo -e "  You can now use ${BOLD}Services${NC} to enable auto-upgrade, backup, health checks, monitoring."
+    echo ""
+    read -rp "$(echo -e "${BOLD}Press Enter to continue${NC}")"
+    main_menu
+}
+
 version_gte() {
     [ "$(printf '%s\n%s' "$1" "$2" | sort -V | tail -1)" = "$1" ]
 }
@@ -389,10 +509,27 @@ main_menu() {
 # ============================================================
 mode_services() {
     if [ ! -f "$TOOLKIT_CONF" ]; then
-        warn "Not installed — toolkit.conf not found"
-        read -rp "$(echo -e "${BOLD}Press Enter to return${NC}")"
-        main_menu
-        return
+        echo ""
+        if detect_existing_validator; then
+            echo -e "  ${YELLOW}⚠ toolkit.conf not found, but a validator installation was detected.${NC}"
+            echo ""
+            echo "  1) Create config for existing validator (no reinstall)"
+            echo "  2) Back"
+            echo ""
+            local choice
+            read -rp "$(echo -e "${BOLD}Choice [1-2]${NC}: ")" choice
+            case "$choice" in
+                1) import_existing_config; return ;;
+                *) main_menu; return ;;
+            esac
+        else
+            echo -e "  ${YELLOW}⚠ No validator installation found.${NC}"
+            echo -e "  Run option ${BOLD}1) Install${NC} first."
+            echo ""
+            read -rp "$(echo -e "${BOLD}Press Enter to return${NC}")"
+            main_menu
+            return
+        fi
     fi
     source "$TOOLKIT_CONF"
 
