@@ -15,6 +15,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
@@ -1105,7 +1106,18 @@ _svc_monitoring() {
         mon_project=$(_mon_compose_project)
         echo -e "  Status:  ${GREEN}running${NC}"
         echo -e "  Grafana: http://localhost:3001"
-        [ -n "${TAILSCALE_IP:-}" ] && echo -e "  Tailscale: http://${TAILSCALE_IP}:3001"
+        if [ -n "${TAILSCALE_IP:-}" ]; then
+            echo -e "  Tailscale: http://${TAILSCALE_IP}:3001"
+        else
+            local _server_ip
+            # Prefer SSH_CONNECTION (real client-facing IP), fallback to public IP
+            _server_ip=$(echo "${SSH_CONNECTION:-}" | awk '{print $3}')
+            if [ -z "$_server_ip" ]; then
+                _server_ip=$(curl -sf --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')
+            fi
+            echo -e "  SSH tunnel: ${BOLD}ssh -L 3001:localhost:3001 $(whoami)@${_server_ip} -N${NC}"
+            echo -e "  Then open: http://localhost:3001"
+        fi
         echo ""
         echo "  1) Stop monitoring"
         echo "  2) Restart monitoring"
@@ -1257,18 +1269,19 @@ mode_advanced() {
     echo ""
     echo -e "${BOLD}═══════════════════ Advanced Options ═══════════════════${NC}"
     echo ""
-    echo -e "  ${YELLOW}⚠ Coming in Phase 2:${NC}"
+    echo -e "  ${BOLD}Canton Network Indexer${NC}"
+    echo -e "  Unified REST API for Canton Network — historical rewards,"
+    echo -e "  prices, validator uptime, leaderboard and more."
     echo ""
-    echo -e "  • Indexer setup & deployment"
-    echo -e "  • Custom API integrations"
-    echo -e "  • Cantara onboarding integration"
-    echo -e "  • DAO governance tools"
-    echo -e "  • Advanced monitoring configuration"
+    echo -e "  ${CYAN}https://github.com/web3validator/canton-network-indexer${NC}"
     echo ""
-    echo -e "  ${BOLD}Currently available via manual configuration:${NC}"
-    echo -e "  • Auto-upgrade: edit ~/.canton/toolkit.conf (AUTO_UPGRADE=true/false)"
-    echo -e "  • Monitoring: cd ~/canton-validator-toolkit/monitoring && docker compose up -d"
-    echo -e "  • Backups: configure BACKUP_TYPE in ~/.canton/toolkit.conf"
+    echo -e "  Quick deploy (mainnet + testnet + devnet):"
+    echo -e "  ${BOLD}bash deploy_indexer.sh -h <server> -u <user> -n mainnet,testnet,devnet${NC}"
+    echo ""
+    echo -e "  Live API:"
+    echo -e "  • MainNet: ${CYAN}https://canton-indexer.web34ever.com${NC}"
+    echo -e "  • TestNet: ${CYAN}https://canton-indexer.web34ever.com/testnet/${NC}"
+    echo -e "  • DevNet:  ${CYAN}https://canton-indexer.web34ever.com/devnet/${NC}"
     echo ""
     read -rp "$(echo -e "${BOLD}Press Enter to return to main menu${NC}")"
     main
@@ -1979,6 +1992,7 @@ save_toolkit_conf() {
 # Canton Validator Toolkit — configuration
 # Written by setup.sh on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
+# ── Validator ─────────────────────────────────
 NETWORK=${NETWORK}
 VERSION=${version}
 PARTY_HINT=${PARTY_HINT}
@@ -1986,6 +2000,9 @@ MIGRATION_ID=${MIGRATION_ID}
 SV_URL=${SV_URL}
 SCAN_URL=${SCAN_URL}
 NODE_NAME=${NODE_NAME}
+CANTON_NETWORK_NAME=${CANTON_NETWORK_NAME:-splice-validator}
+
+# ── Backup ────────────────────────────────────
 BACKUP_TYPE=${BACKUP_TYPE}
 REMOTE_HOST=${REMOTE_HOST:-}
 REMOTE_PATH=${REMOTE_PATH:-}
@@ -1994,20 +2011,23 @@ R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
 R2_ACCESS_KEY=${R2_ACCESS_KEY:-}
 R2_SECRET_KEY=${R2_SECRET_KEY:-}
 RETENTION_DAYS=${RETENTION_DAYS}
+
+# ── Alerts ────────────────────────────────────
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
 SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
 PAGERDUTY_ROUTING_KEY=${PAGERDUTY_ROUTING_KEY:-}
+
+# ── Services & Monitoring ─────────────────────
 AUTO_UPGRADE=${AUTO_UPGRADE:-false}
+WAIT_HOURS=12
 MONITORING=${MONITORING}
-CLOUDFLARE_TUNNEL=${CLOUDFLARE_TUNNEL}
-CLOUDFLARE_DOMAIN=${CLOUDFLARE_DOMAIN:-}
 TAILSCALE=${TAILSCALE:-false}
 TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY:-}
-CANTON_NETWORK_NAME=${CANTON_NETWORK_NAME:-splice-validator}
-AUTO_RESTART=true
-WAIT_HOURS=12
+TAILSCALE_IP=${TAILSCALE_IP:-}
+
+# ── Internal ──────────────────────────────────
 TOOLKIT_DIR=${TOOLKIT_DIR}
 CONFEOF
     chmod 600 "$TOOLKIT_CONF"
@@ -2183,7 +2203,28 @@ install_tailscale() {
         echo ""
         echo -e "  ${GREEN}${BOLD}Grafana via Tailscale:${NC}  http://${ts_ip}:3001"
         echo -e "  Install Tailscale on your device: ${BLUE}https://tailscale.com/download${NC}"
-        grep -q "^TAILSCALE_IP=" "$TOOLKIT_CONF" 2>/dev/null             && sed -i "s|^TAILSCALE_IP=.*|TAILSCALE_IP=${ts_ip}|" "$TOOLKIT_CONF"             || echo "TAILSCALE_IP=${ts_ip}" >> "$TOOLKIT_CONF"
+        grep -q "^TAILSCALE_IP=" "$TOOLKIT_CONF" 2>/dev/null \
+            && sed -i "s|^TAILSCALE_IP=.*|TAILSCALE_IP=${ts_ip}|" "$TOOLKIT_CONF" \
+            || echo "TAILSCALE_IP=${ts_ip}" >> "$TOOLKIT_CONF"
+
+        # Restart monitoring bound to Tailscale IP so it's reachable remotely
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "canton-grafana"; then
+            log "Restarting monitoring with MONITOR_BIND_IP=${ts_ip}..."
+            local mon_dir
+            mon_dir=$(docker inspect canton-grafana \
+                --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null \
+                || echo "$TOOLKIT_DIR/monitoring")
+            local mon_project
+            mon_project=$(docker inspect canton-grafana \
+                --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null \
+                || echo "monitoring")
+            cd "$mon_dir"
+            MONITOR_BIND_IP="$ts_ip" \
+            CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}" \
+                docker compose -p "$mon_project" up -d --force-recreate grafana prometheus node-exporter \
+                2>/dev/null || true
+            success "Monitoring restarted on ${ts_ip}:3001"
+        fi
     fi
 }
 

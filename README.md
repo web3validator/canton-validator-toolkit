@@ -17,8 +17,9 @@ git clone https://github.com/web3validator/canton-validator-toolkit ~/canton-val
 | `scripts/setup.sh` | Interactive menu: install / update / status / services |
 | `scripts/auto_upgrade.sh` | Cron-based auto-upgrader (disabled by default) |
 | `scripts/backup.sh` | PostgreSQL dump → rsync or Cloudflare R2 |
-| `scripts/check_health.sh` | Health check + multi-channel alerts (no spam) |
+| `scripts/check_health.sh` | Health check + multi-channel alerts, state machine (no spam) |
 | `scripts/transfer.sh` | CLI wallet: balance / send CC / history |
+| `scripts/backup.sh` | PostgreSQL dump → rsync or R2, alerts only on failure/recovery |
 | `monitoring/` | Prometheus + Grafana + node-exporter stack |
 
 ---
@@ -54,7 +55,7 @@ The installer will ask you:
 5. Onboarding secret (leave empty if already onboarded)
 6. Wallet password (nginx basic auth, username: `validator`)
 7. Backup target: rsync / Cloudflare R2 / skip
-8. Alert channels: Telegram / Discord / Slack / PagerDuty (all optional)
+8. Alert channels: Telegram / Discord / Slack / PagerDuty (all optional, configure any combination)
 9. Auto-upgrade: yes/no (default: **no**)
 10. Grafana monitoring stack: yes/no
 11. Grafana remote access: SSH tunnel / Tailscale / skip
@@ -96,7 +97,7 @@ Disabled by default. To enable:
 sed -i 's/AUTO_UPGRADE=false/AUTO_UPGRADE=true/' ~/.canton/toolkit.conf
 ```
 
-Enable/disable anytime via `setup.sh → Services → Auto-upgrade`.
+Enable/disable anytime via `setup.sh → 4) Services → Auto-upgrade`.
 
 Runs daily at 22:00 via cron. Safety rules:
 - Skips if already on latest
@@ -136,11 +137,11 @@ Rolling back is as simple as starting the old version directory.
 | Service | What you can do |
 |---------|----------------|
 | Auto-upgrade | Enable / disable cron (daily 22:00) |
-| Backup | Switch between rsync / R2 / disabled, change retention |
-| Health checks | Enable / disable cron (every 15 min), configure alert channels |
-| Monitoring | Start / stop / restart Grafana stack, add Tailscale |
+| Backup | Switch rsync / R2 / disabled; SSH key check + remote path creation; alerts on failure/recovery only |
+| Health checks | Enable / disable cron (every 15 min); configure Telegram / Discord / Slack / PagerDuty |
+| Monitoring | Start / stop / restart Grafana stack; Tailscale setup; SSH tunnel hint |
 
-If `~/.canton/toolkit.conf` is missing but a validator is detected, Services offers to import config from your existing installation — no reinstall needed.
+If `~/.canton/toolkit.conf` is missing but a validator is detected, Services auto-detects version / party hint / SV URLs from running containers and `.env`, creates config without touching the validator.
 
 ---
 
@@ -213,14 +214,20 @@ Grafana alerts → configure in Grafana UI. See [docs/monitoring.md](docs/monito
 
 ## Backup
 
-Configured during setup. Runs every 4h via cron.
+Configured during setup or via `Services → Backup`. Runs every 4h via cron.
 
 ```bash
 # Manual backup
 ~/canton-validator-toolkit/scripts/backup.sh
 ```
 
-Backs up both `validator` and `participant` PostgreSQL databases. Supports rsync (SSH) and Cloudflare R2. See [docs/backup.md](docs/backup.md).
+Backs up both `validator` and `participant` PostgreSQL databases. Supports rsync (SSH) and Cloudflare R2.
+
+Alert behavior: **silent on success** — sends alert only on failure, recovery message when fixed. No 4h spam.
+
+Local dumps stored in `~/.canton/backups/`, cleaned up by `RETENTION_DAYS`. Remote files older than `RETENTION_DAYS` are deleted after each run.
+
+See [docs/backup.md](docs/backup.md).
 
 ---
 
@@ -228,7 +235,7 @@ Backs up both `validator` and `participant` PostgreSQL databases. Supports rsync
 
 Runs every 15 minutes via cron. Checks:
 - Container running + healthy status
-- Sync lag (warn >60s, critical >120s)
+- Sync lag (warn >120s, critical >240s)
 - Retry failures
 - Disk space (<20GB free)
 

@@ -34,10 +34,9 @@ DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
 SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
 PAGERDUTY_ROUTING_KEY="${PAGERDUTY_ROUTING_KEY:-}"
 NODE_NAME="${NODE_NAME:-Canton-Validator}"
-AUTO_RESTART="${AUTO_RESTART:-true}"
 
-SYNC_LAG_WARN=60      # seconds — warning threshold
-SYNC_LAG_CRIT=120     # seconds — critical threshold
+SYNC_LAG_WARN=120     # seconds — warning threshold
+SYNC_LAG_CRIT=240     # seconds — critical threshold
 RETRY_FAIL_THRESH=10  # splice_retries_failures threshold
 DISK_WARN_GB=20       # GB free — warning threshold
 
@@ -139,18 +138,8 @@ check_containers() {
 
         if [ "$running" != "true" ]; then
             issues="${issues}🔴 ${container}: DOWN\n"
-
-            if [ "$AUTO_RESTART" = "true" ]; then
-                warn "Auto-restarting $container..."
-                docker start "$container" 2>/dev/null || true
-            fi
         elif [ "$health" != "healthy" ] && [ "$health" != "" ]; then
             issues="${issues}🟡 ${container}: ${health}\n"
-
-            if [ "$AUTO_RESTART" = "true" ] && [ "$health" = "unhealthy" ]; then
-                warn "Restarting unhealthy $container..."
-                docker restart "$container" 2>/dev/null || true
-            fi
         fi
     done
 
