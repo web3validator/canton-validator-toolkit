@@ -16,7 +16,7 @@ log()     { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
 success() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ $1"; }
 warn()    { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚠ $1"; }
 error()   { echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✗ $1" >&2; }
-die()     { error "$1"; send_telegram_error "$1"; exit 1; }
+die()     { error "$1"; _backup_alert_failure "$1"; exit 1; }
 
 # ============================================================
 # Load config
@@ -38,21 +38,92 @@ R2_SECRET_KEY="${R2_SECRET_KEY:-}"
 RETENTION_DAYS="${RETENTION_DAYS:-1}"
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
+PAGERDUTY_ROUTING_KEY="${PAGERDUTY_ROUTING_KEY:-}"
 NODE_NAME="${NODE_NAME:-Canton-Validator}"
 
+BACKUP_STATE_DIR="$CANTON_DIR/health"
+BACKUP_STATE_FILE="$BACKUP_STATE_DIR/backup_state"
+mkdir -p "$BACKUP_STATE_DIR"
+
 # ============================================================
-# Telegram
+# Alert channels
 # ============================================================
-send_telegram() {
+_tg() {
     [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ] && return 0
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
         -d chat_id="${TELEGRAM_CHAT_ID}" \
         -d parse_mode="HTML" \
         -d text="$1" > /dev/null 2>&1 || true
 }
+_discord() {
+    [ -z "$DISCORD_WEBHOOK_URL" ] && return 0
+    local text; text=$(echo "$1" | sed 's/<b>//g; s/<\/b>//g; s/<[^>]*>//g')
+    curl -s -X POST "$DISCORD_WEBHOOK_URL" -H "Content-Type: application/json" \
+        -d "{\"content\": $(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" <<< "$text")}" \
+        > /dev/null 2>&1 || true
+}
+_slack() {
+    [ -z "$SLACK_WEBHOOK_URL" ] && return 0
+    local text; text=$(echo "$1" | sed 's/<b>//g; s/<\/b>//g; s/<[^>]*>//g')
+    curl -s -X POST "$SLACK_WEBHOOK_URL" -H "Content-Type: application/json" \
+        -d "{\"text\": $(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" <<< "$text")}" \
+        > /dev/null 2>&1 || true
+}
+_pagerduty() {
+    [ -z "$PAGERDUTY_ROUTING_KEY" ] && return 0
+    local action="$2"
+    local summary; summary=$(echo "$1" | sed 's/<[^>]*>//g' | head -c 1024)
+    curl -s -X POST "https://events.pagerduty.com/v2/enqueue" \
+        -H "Content-Type: application/json" \
+        -d "{\"routing_key\":\"${PAGERDUTY_ROUTING_KEY}\",\"event_action\":\"${action}\",\"dedup_key\":\"canton-backup-$(hostname)\",\"payload\":{\"summary\":$(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" <<< "$summary"),\"source\":\"$(hostname)\",\"severity\":\"critical\"}}" \
+        > /dev/null 2>&1 || true
+}
 
-send_telegram_error() {
-    send_telegram "❌ <b>${NODE_NAME}</b> — Backup FAILED%0A%0A$1%0AHost: $(hostname)%0ATime: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+send_alert() {
+    local text="$1" action="${2:-trigger}"
+    _tg "$text"; _discord "$text"; _slack "$text"; _pagerduty "$text" "$action"
+}
+
+# ============================================================
+# Backup state machine — alert on failure, recovery on fix, silent on success
+# ============================================================
+_backup_alert_failure() {
+    local reason="$1"
+    local prev_state="0"
+    [ -f "$BACKUP_STATE_FILE" ] && prev_state=$(cat "$BACKUP_STATE_FILE")
+
+    local msg="❌ <b>${NODE_NAME}</b> — Backup FAILED
+
+${reason}
+Host: $(hostname)
+Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+    if [ "$prev_state" != "1" ]; then
+        send_alert "$msg" "trigger"
+        log "ALERT sent — backup failure"
+    else
+        log "Still failing (no repeat alert)"
+    fi
+    echo "1" > "$BACKUP_STATE_FILE"
+}
+
+_backup_alert_success() {
+    local prev_state="0"
+    [ -f "$BACKUP_STATE_FILE" ] && prev_state=$(cat "$BACKUP_STATE_FILE")
+
+    if [ "$prev_state" = "1" ]; then
+        local msg="✅ <b>${NODE_NAME}</b> — Backup RECOVERED
+Type: ${BACKUP_TYPE}
+Host: $(hostname)
+Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        send_alert "$msg" "resolve"
+        log "RECOVERY sent"
+    else
+        log "Backup OK (no alert — was already healthy)"
+    fi
+    echo "0" > "$BACKUP_STATE_FILE"
 }
 
 # ============================================================
@@ -117,6 +188,11 @@ upload_rsync() {
     if [ -z "$REMOTE_HOST" ]; then
         die "REMOTE_HOST not set in toolkit.conf"
     fi
+
+    # Expand ~ to absolute path on remote (in case old config stored ~/...)
+    local remote_user
+    remote_user=$(echo "$REMOTE_HOST" | cut -d@ -f1)
+    REMOTE_PATH="${REMOTE_PATH/#\~//home/${remote_user}}"
 
     log "Syncing to $REMOTE_HOST:$REMOTE_PATH ..."
 
@@ -229,7 +305,7 @@ main() {
     cleanup_local
 
     success "Backup completed successfully"
-    send_telegram "✅ <b>${NODE_NAME}</b> — Backup OK%0AType: ${BACKUP_TYPE}%0ATime: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    _backup_alert_success
 }
 
 main "$@"

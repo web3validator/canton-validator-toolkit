@@ -321,9 +321,16 @@ check_sv_whitelist() {
     echo ""
 }
 
+get_validator_container() {
+    docker ps -a --format '{{.Names}}' 2>/dev/null \
+        | grep -E 'validator-1$' | grep -v postgres | head -1
+}
+
 get_our_version() {
-    docker inspect splice-validator-validator-1 \
-        --format '{{.Config.Image}}' 2>/dev/null \
+    local c
+    c=$(get_validator_container)
+    [ -z "$c" ] && return 1
+    docker inspect "$c" --format '{{.Config.Image}}' 2>/dev/null \
         | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
 
@@ -357,30 +364,64 @@ import_existing_config() {
     echo ""
 
     # Try to auto-detect values from running containers / env files
-    local detected_version detected_network detected_party detected_sv detected_scan detected_migration
+    local detected_version="" detected_network="" detected_party="" detected_sv="" detected_scan="" detected_migration=""
 
-    # Version from running container image
-    detected_version=$(docker ps --format '{{.Image}}' 2>/dev/null \
-        | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
+    # Version from running container image (splice/canton images only, not nginx/postgres)
+    detected_version=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null \
+        | grep -E 'validator-1' | grep -v 'nginx\|postgres' \
+        | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 
-    # Try to find .env in bundle
-    local env_file
-    env_file=$(find "$HOME/.canton" -maxdepth 5 -name ".env" 2>/dev/null | head -1)
+    # Try to find .env in bundle — search deeper to catch ~/.canton/devnet/0.5.13/... structure
+    local env_file=""
+    env_file=$(find "$HOME/.canton" -maxdepth 7 -name ".env" 2>/dev/null \
+        | grep -v 'current/' | sort -r | head -1 || true)
     if [ -n "$env_file" ]; then
-        detected_party=$(grep  '^PARTY_HINT='      "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
-        detected_sv=$(grep     '^SPONSOR_SV_ADDRESS=' "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
-        detected_scan=$(grep   '^SCAN_ADDRESS='    "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
-        detected_migration=$(grep '^MIGRATION_ID=' "$env_file" 2>/dev/null | cut -d= -f2 || echo "")
+        detected_party=$(grep     '^PARTY_HINT='         "$env_file" 2>/dev/null | cut -d= -f2 || true)
+        detected_sv=$(grep        '^SPONSOR_SV_ADDRESS=' "$env_file" 2>/dev/null | cut -d= -f2 || true)
+        detected_scan=$(grep      '^SCAN_ADDRESS='       "$env_file" 2>/dev/null | cut -d= -f2 || true)
+        detected_migration=$(grep '^MIGRATION_ID='       "$env_file" 2>/dev/null | cut -d= -f2 || true)
     fi
 
-    # Detect network from SV URL
+    # Detect network — check SV URL, container names, and .canton bundle path
+    local _net_hint=""
+
+    # 1. From SV URL
     if echo "${detected_sv:-}" | grep -q '\.test\.'; then
-        detected_network="testnet"
+        _net_hint="testnet"
     elif echo "${detected_sv:-}" | grep -q '\.dev\.'; then
-        detected_network="devnet"
-    else
-        detected_network="mainnet"
+        _net_hint="devnet"
     fi
+
+    # 2. From running container names (e.g. splice-testnet-validator-1)
+    if [ -z "$_net_hint" ]; then
+        local _cnames
+        _cnames=$(docker ps --format '{{.Names}}' 2>/dev/null || true)
+        if echo "$_cnames" | grep -qi 'testnet'; then
+            _net_hint="testnet"
+        elif echo "$_cnames" | grep -qi 'devnet\|dev'; then
+            _net_hint="devnet"
+        fi
+    fi
+
+    # 3. From .canton bundle path (e.g. ~/.canton/0.5.13/splice-node/...)
+    if [ -z "$_net_hint" ] && [ -n "$env_file" ]; then
+        if echo "$env_file" | grep -qi 'testnet'; then
+            _net_hint="testnet"
+        elif echo "$env_file" | grep -qi 'devnet\|dev'; then
+            _net_hint="devnet"
+        fi
+    fi
+
+    # 4. From SCAN_ADDRESS in .env
+    if [ -z "$_net_hint" ]; then
+        if echo "${detected_scan:-}" | grep -q '\.test\.'; then
+            _net_hint="testnet"
+        elif echo "${detected_scan:-}" | grep -q '\.dev\.'; then
+            _net_hint="devnet"
+        fi
+    fi
+
+    detected_network="${_net_hint:-mainnet}"
 
     [ -n "$detected_version" ] && echo -e "  ${GREEN}Detected version  :${NC} $detected_version"
     [ -n "$detected_network" ] && echo -e "  ${GREEN}Detected network  :${NC} $detected_network"
@@ -402,11 +443,31 @@ import_existing_config() {
         *) NETWORK="${detected_network:-mainnet}" ;;
     esac
 
-    prompt VERSION       "Canton version"   "${detected_version:-}"
-    prompt PARTY_HINT    "Party hint"        "${detected_party:-}"
-    prompt MIGRATION_ID  "Migration ID"      "${detected_migration:-4}"
-    prompt SV_URL        "SV URL"            "${detected_sv:-}"
-    prompt SCAN_URL      "Scan URL"          "${detected_scan:-}"
+    # Set SV/Scan defaults by network if not detected from .env
+    local default_sv default_scan default_migration
+    case "$NETWORK" in
+        testnet)
+            default_sv="https://sv.sv-2.test.global.canton.network.digitalasset.com"
+            default_scan="https://scan.sv-2.test.global.canton.network.digitalasset.com"
+            default_migration="1"
+            ;;
+        devnet)
+            default_sv="https://sv.sv-2.dev.global.canton.network.digitalasset.com"
+            default_scan="https://scan.sv-2.dev.global.canton.network.digitalasset.com"
+            default_migration="1"
+            ;;
+        *)
+            default_sv="https://sv.sv-2.global.canton.network.digitalasset.com"
+            default_scan="https://scan.sv-2.global.canton.network.digitalasset.com"
+            default_migration="4"
+            ;;
+    esac
+
+    prompt VERSION       "Canton version"    "${detected_version:-}"
+    prompt PARTY_HINT    "Party hint"         "${detected_party:-}"
+    prompt MIGRATION_ID  "Migration ID"       "${detected_migration:-$default_migration}"
+    prompt SV_URL        "SV URL"             "${detected_sv:-$default_sv}"
+    prompt SCAN_URL      "Scan URL"           "${detected_scan:-$default_scan}"
     prompt NODE_NAME     "Node name (for alerts)" "${PARTY_HINT}-${NETWORK}"
 
     # Backup
@@ -415,18 +476,43 @@ import_existing_config() {
     R2_BUCKET=""; R2_ACCOUNT_ID=""; R2_ACCESS_KEY=""; R2_SECRET_KEY=""
     RETENTION_DAYS="1"
 
-    # Telegram
+    # Alert channels
+    echo ""
+    echo -e "${BOLD}Alert channels (all optional, configure later via Services → Health checks):${NC}"
+    echo ""
+
     local tg_choice
-    read -rp "$(echo -e "${BOLD}Configure Telegram alerts? [y/N]${NC}: ")" tg_choice
+    read -rp "$(echo -e "${BOLD}Configure Telegram? [y/N]${NC}: ")" tg_choice
     if [[ "$tg_choice" =~ ^[Yy]$ ]]; then
         prompt TELEGRAM_BOT_TOKEN "Bot token" ""
         prompt TELEGRAM_CHAT_ID   "Chat ID"   ""
     else
         TELEGRAM_BOT_TOKEN=""; TELEGRAM_CHAT_ID=""
     fi
-    DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
-    SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
-    PAGERDUTY_ROUTING_KEY="${PAGERDUTY_ROUTING_KEY:-}"
+
+    local dc_choice
+    read -rp "$(echo -e "${BOLD}Configure Discord webhook? [y/N]${NC}: ")" dc_choice
+    if [[ "$dc_choice" =~ ^[Yy]$ ]]; then
+        prompt DISCORD_WEBHOOK_URL "Discord webhook URL" ""
+    else
+        DISCORD_WEBHOOK_URL=""
+    fi
+
+    local sl_choice
+    read -rp "$(echo -e "${BOLD}Configure Slack webhook? [y/N]${NC}: ")" sl_choice
+    if [[ "$sl_choice" =~ ^[Yy]$ ]]; then
+        prompt SLACK_WEBHOOK_URL "Slack webhook URL" ""
+    else
+        SLACK_WEBHOOK_URL=""
+    fi
+
+    local pd_choice
+    read -rp "$(echo -e "${BOLD}Configure PagerDuty? [y/N]${NC}: ")" pd_choice
+    if [[ "$pd_choice" =~ ^[Yy]$ ]]; then
+        prompt PAGERDUTY_ROUTING_KEY "Routing key" ""
+    else
+        PAGERDUTY_ROUTING_KEY=""
+    fi
 
     AUTO_UPGRADE="false"
     MONITORING="false"
@@ -643,15 +729,57 @@ _svc_backup() {
     case "$choice" in
         1)
             BACKUP_TYPE="rsync"
+            echo ""
+            echo -e "  ${YELLOW}Requirements:${NC}"
+            echo -e "  • SSH key from this server must be added to the remote host"
+            echo -e "  • Check: ${BOLD}cat ~/.ssh/id_rsa.pub${NC}  (or id_ed25519.pub)"
+            echo -e "  • Add to remote: ${BOLD}ssh-copy-id user@host${NC}"
+            echo ""
             prompt REMOTE_HOST "Remote host (user@host)" "${REMOTE_HOST:-}"
-            prompt REMOTE_PATH "Remote path" "${REMOTE_PATH:-~/canton-backups/$NETWORK}"
+            # Test SSH connection before proceeding
+            echo ""
+            log "Testing SSH connection to $REMOTE_HOST ..."
+            if ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "exit" 2>/dev/null; then
+                success "SSH connection OK"
+                # Expand ~ for remote path default
+                local remote_user_hint
+                remote_user_hint=$(echo "$REMOTE_HOST" | cut -d@ -f1)
+                local raw_path
+                prompt raw_path "Remote path (absolute)" "${REMOTE_PATH:-/home/${remote_user_hint}/canton-backups/${NETWORK:-mainnet}}"
+                REMOTE_PATH="${raw_path/#\~//home/${remote_user_hint}}"
+                # Create remote dir if missing
+                log "Ensuring remote path exists: $REMOTE_PATH ..."
+                if ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" "mkdir -p '$REMOTE_PATH'" 2>/dev/null; then
+                    success "Remote path ready: $REMOTE_HOST:$REMOTE_PATH"
+                else
+                    warn "Could not create remote path — check permissions on $REMOTE_HOST"
+                fi
+            else
+                echo ""
+                warn "Cannot connect to $REMOTE_HOST"
+                echo ""
+                echo -e "  ${BOLD}To fix:${NC}"
+                echo -e "  1. Generate key if missing:  ${BOLD}ssh-keygen -t ed25519${NC}"
+                echo -e "  2. Copy to remote:           ${BOLD}ssh-copy-id $REMOTE_HOST${NC}"
+                echo -e "  3. Test manually:            ${BOLD}ssh $REMOTE_HOST${NC}"
+                echo ""
+                local ssh_choice
+                read -rp "$(echo -e "${BOLD}Continue anyway? [y/N]${NC}: ")" ssh_choice
+                [[ "$ssh_choice" =~ ^[Yy]$ ]] || return
+                # SSH failed — still ask for path so config can be saved
+                local raw_path_fail
+                local remote_user_fail
+                remote_user_fail=$(echo "$REMOTE_HOST" | cut -d@ -f1)
+                prompt raw_path_fail "Remote path (absolute)" "${REMOTE_PATH:-/home/${remote_user_fail}/canton-backups/${NETWORK:-mainnet}}"
+                REMOTE_PATH="${raw_path_fail/#\~//home/${remote_user_fail}}"
+            fi
             R2_BUCKET=""; R2_ACCOUNT_ID=""; R2_ACCESS_KEY=""; R2_SECRET_KEY=""
             local ret_input
             prompt ret_input "Retention (days)" "${RETENTION_DAYS:-1}"
             [[ "$ret_input" =~ ^[0-9]+$ ]] && RETENTION_DAYS="$ret_input" || RETENTION_DAYS="1"
             _backup_save_conf
             _cron_add "0 */4 * * * $TOOLKIT_DIR/scripts/backup.sh >> $LOG_DIR/backup.log 2>&1" "backup.sh"
-            success "rsync backup enabled (every 4h)"
+            success "rsync backup enabled (every 4h → $REMOTE_HOST:$REMOTE_PATH)"
             ;;
         2)
             BACKUP_TYPE="r2"
@@ -961,8 +1089,21 @@ _svc_monitoring() {
     local running=false
     docker ps --format '{{.Names}}' 2>/dev/null | grep -q "canton-grafana\|canton-prometheus" && running=true
 
+    # Detect compose working dir and project from running container labels
+    _mon_compose_dir() {
+        docker inspect canton-grafana \
+            --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null || echo "$TOOLKIT_DIR/monitoring"
+    }
+    _mon_compose_project() {
+        docker inspect canton-grafana \
+            --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || echo "monitoring"
+    }
+
     if [ "$running" = "true" ]; then
-        echo -e "  Status: ${GREEN}running${NC}"
+        local mon_dir mon_project
+        mon_dir=$(_mon_compose_dir)
+        mon_project=$(_mon_compose_project)
+        echo -e "  Status:  ${GREEN}running${NC}"
         echo -e "  Grafana: http://localhost:3001"
         [ -n "${TAILSCALE_IP:-}" ] && echo -e "  Tailscale: http://${TAILSCALE_IP}:3001"
         echo ""
@@ -974,14 +1115,16 @@ _svc_monitoring() {
         read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
         case "$choice" in
             1)
-                cd "$TOOLKIT_DIR/monitoring"
-                CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}" docker compose down
+                cd "$mon_dir"
+                CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}" \
+                    docker compose -p "$mon_project" down
                 sed -i "s|^MONITORING=.*|MONITORING=false|" "$TOOLKIT_CONF"
                 success "Monitoring stopped"
                 ;;
             2)
-                cd "$TOOLKIT_DIR/monitoring"
-                CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}" docker compose restart
+                cd "$mon_dir"
+                CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}" \
+                    docker compose -p "$mon_project" restart
                 success "Monitoring restarted"
                 ;;
             3) return ;;
@@ -1067,7 +1210,11 @@ mode_status() {
 
     echo -e "  ${BOLD}Containers:${NC}"
     local has_unhealthy=false
-    for c in splice-validator-validator-1 splice-validator-participant-1 splice-validator-nginx-1; do
+    local _vc _pc _nc
+    _vc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'validator-1$'   | grep -v postgres | head -1)
+    _pc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'participant-1$'  | head -1)
+    _nc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'nginx-1$'        | head -1)
+    for c in ${_vc:-splice-validator-validator-1} ${_pc:-splice-validator-participant-1} ${_nc:-splice-validator-nginx-1}; do
         local running health
         running=$(docker inspect --format='{{.State.Running}}' "$c" 2>/dev/null || echo "false")
         health=$(docker inspect --format='{{.State.Health.Status}}' "$c" 2>/dev/null || echo "n/a")
@@ -1088,7 +1235,7 @@ mode_status() {
 
     if [ "$has_unhealthy" = "true" ]; then
         echo -e "  ${YELLOW}⚠ WARNING: One or more containers are unhealthy!${NC}"
-        echo -e "  Check logs: ${BOLD}docker logs splice-validator-validator-1${NC}"
+        echo -e "  Check logs: ${BOLD}docker logs ${_vc:-splice-validator-validator-1}${NC}"
         echo ""
     fi
 
@@ -1208,7 +1355,9 @@ collect_install_input() {
 
     # Check if already onboarded (validator container was running before)
     local already_onboarded="false"
-    if docker inspect splice-validator-validator-1 &>/dev/null 2>&1; then
+    local _existing_vc
+    _existing_vc=$(get_validator_container)
+    if [ -n "$_existing_vc" ]; then
         already_onboarded="true"
     fi
 
@@ -1561,8 +1710,10 @@ do_upgrade() {
         sleep 10
         attempts=$((attempts + 1))
         local status
+        local _wvc
+        _wvc=$(get_validator_container)
         status=$(docker inspect --format='{{.State.Health.Status}}' \
-            splice-validator-validator-1 2>/dev/null || echo "not_found")
+            "${_wvc:-splice-validator-validator-1}" 2>/dev/null || echo "not_found")
         log "      [$attempts/9] status: $status"
         if [ "$status" = "healthy" ]; then
             healthy=true
@@ -1935,8 +2086,10 @@ wait_healthy() {
 
     while [ $attempts -lt 18 ]; do
         local status
+        local _wvc2
+        _wvc2=$(get_validator_container)
         status=$(docker inspect --format='{{.State.Health.Status}}' \
-            splice-validator-validator-1 2>/dev/null || echo "not_found")
+            "${_wvc2:-splice-validator-validator-1}" 2>/dev/null || echo "not_found")
         [ "$status" = "healthy" ] && success "Validator is healthy" && return 0
         attempts=$((attempts + 1))
         echo -n "  [$attempts/18] $status — 10s..."

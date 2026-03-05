@@ -14,10 +14,10 @@ git clone https://github.com/web3validator/canton-validator-toolkit ~/canton-val
 
 | Script | What it does |
 |--------|-------------|
-| `scripts/setup.sh` | Interactive menu: install / update / status |
+| `scripts/setup.sh` | Interactive menu: install / update / status / services |
 | `scripts/auto_upgrade.sh` | Cron-based auto-upgrader (disabled by default) |
 | `scripts/backup.sh` | PostgreSQL dump → rsync or Cloudflare R2 |
-| `scripts/check_health.sh` | Health check + Telegram alerts (no spam) |
+| `scripts/check_health.sh` | Health check + multi-channel alerts (no spam) |
 | `scripts/transfer.sh` | CLI wallet: balance / send CC / history |
 | `monitoring/` | Prometheus + Grafana + node-exporter stack |
 
@@ -54,13 +54,17 @@ The installer will ask you:
 5. Onboarding secret (leave empty if already onboarded)
 6. Wallet password (nginx basic auth, username: `validator`)
 7. Backup target: rsync / Cloudflare R2 / skip
-8. Telegram alerts (bot token + chat ID)
+8. Alert channels: Telegram / Discord / Slack / PagerDuty (all optional)
 9. Auto-upgrade: yes/no (default: **no**)
 10. Grafana monitoring stack: yes/no
 11. Grafana remote access: SSH tunnel / Tailscale / skip
 12. Cloudflare Tunnel for wallet: yes/no
 
 After install, everything is configured and running. Config saved to `~/.canton/toolkit.conf`.
+
+### Already running a validator?
+
+If your validator is already running but was not installed via this toolkit, choose **option 4 → Services** from the main menu. The script detects your running containers and `.env` file, auto-fills version / party hint / SV URLs, and creates `~/.canton/toolkit.conf` without touching the validator.
 
 ---
 
@@ -92,6 +96,8 @@ Disabled by default. To enable:
 sed -i 's/AUTO_UPGRADE=false/AUTO_UPGRADE=true/' ~/.canton/toolkit.conf
 ```
 
+Enable/disable anytime via `setup.sh → Services → Auto-upgrade`.
+
 Runs daily at 22:00 via cron. Safety rules:
 - Skips if already on latest
 - Skips if our version ≥ network version (anti-downgrade)
@@ -120,6 +126,21 @@ Canton bundles are installed to `~/.canton/<version>/` and never modified after 
 ```
 
 Rolling back is as simple as starting the old version directory.
+
+---
+
+## Services menu
+
+`setup.sh → option 4` — manage each service independently without reinstalling:
+
+| Service | What you can do |
+|---------|----------------|
+| Auto-upgrade | Enable / disable cron (daily 22:00) |
+| Backup | Switch between rsync / R2 / disabled, change retention |
+| Health checks | Enable / disable cron (every 15 min), configure alert channels |
+| Monitoring | Start / stop / restart Grafana stack, add Tailscale |
+
+If `~/.canton/toolkit.conf` is missing but a validator is detected, Services offers to import config from your existing installation — no reinstall needed.
 
 ---
 
@@ -186,7 +207,7 @@ Dashboard includes 38 panels across 8 sections: Overview, Rewards & Economics, N
 
 Prometheus scrapes `validator:10013` and `participant:10013` directly — not via nginx (standard Prometheus can't set custom `Host` headers).
 
-Grafana alerts → Telegram. See [docs/monitoring.md](docs/monitoring.md).
+Grafana alerts → configure in Grafana UI. See [docs/monitoring.md](docs/monitoring.md).
 
 ---
 
