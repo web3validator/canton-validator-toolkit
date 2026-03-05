@@ -89,7 +89,8 @@ dump_databases() {
 
     # Participant DB — detect name from running container env
     local participant_db
-    participant_db=$(docker exec splice-validator-participant-1 \
+    local PARTICIPANT_CONTAINER=$(docker ps --format "{{.Names}}" | grep "participant-1" | head -1)
+    participant_db=$(docker exec "$PARTICIPANT_CONTAINER" \
         bash -c 'echo $CANTON_PARTICIPANT_POSTGRES_DB' 2>/dev/null || echo "")
 
     if [ -z "$participant_db" ]; then

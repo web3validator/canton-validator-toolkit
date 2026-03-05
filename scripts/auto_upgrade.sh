@@ -76,11 +76,20 @@ send_telegram() {
 }
 
 # ============================================================
+# Get validator container name dynamically
+# ============================================================
+get_validator_container() {
+    docker ps --format '{{.Names}}' | grep -E 'validator-1$' | grep -v postgres | head -1
+}
+
+# ============================================================
 # Get current running version from container image tag
 # ============================================================
 get_our_version() {
-    docker inspect splice-validator-validator-1 \
-        --format '{{.Config.Image}}' 2>/dev/null \
+    local c
+    c=$(get_validator_container)
+    [ -z "$c" ] && echo "" && return
+    docker inspect "$c" --format '{{.Config.Image}}' 2>/dev/null \
         | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
 
@@ -363,8 +372,10 @@ wait_healthy() {
         sleep 10
         attempts=$((attempts + 1))
         local status
+        local vc
+        vc=$(get_validator_container)
         status=$(docker inspect --format='{{.State.Health.Status}}' \
-            splice-validator-validator-1 2>/dev/null || echo "not_found")
+            "${vc:-splice-validator-validator-1}" 2>/dev/null || echo "not_found")
         log "[$attempts/6] health: $status"
         [ "$status" = "healthy" ] && return 0
     done

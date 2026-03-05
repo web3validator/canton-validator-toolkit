@@ -74,7 +74,14 @@ unpin_message() {
 check_containers() {
     local issues=""
 
-    for container in splice-validator-validator-1 splice-validator-participant-1 splice-validator-nginx-1; do
+    # Detect container names dynamically (works for mainnet/testnet/devnet prefixes)
+    local validator_c participant_c nginx_c
+    validator_c=$(docker ps -a --format '{{.Names}}' | grep -E 'validator-1$' | grep -v postgres | head -1)
+    participant_c=$(docker ps -a --format '{{.Names}}' | grep -E 'participant-1$' | head -1)
+    nginx_c=$(docker ps -a --format '{{.Names}}' | grep -E 'nginx-1$' | head -1)
+
+    for container in $validator_c $participant_c $nginx_c; do
+        [ -z "$container" ] && continue
         local running health
         running=$(docker inspect --format='{{.State.Running}}' "$container" 2>/dev/null || echo "false")
         health=$(docker inspect --format='{{.State.Health.Status}}' "$container" 2>/dev/null || echo "not_found")
@@ -132,7 +139,7 @@ check_sync_lag() {
     if [ -n "$last_ingested" ] && [ "$last_ingested" != "0" ]; then
         local now_ms lag_s
         now_ms=$(python3 -c "import time; print(int(time.time() * 1000))")
-        lag_s=$(python3 -c "print(max(0, ($now_ms - $last_ingested) // 1000))")
+        lag_s=$(python3 -c "print(int(max(0, (int($now_ms) - int(float($last_ingested))) // 1000)))")
 
         if [ "$lag_s" -gt "$SYNC_LAG_CRIT" ]; then
             issues="${issues}🔴 Sync lag: ${lag_s}s (critical, >${SYNC_LAG_CRIT}s)\n"
