@@ -3,8 +3,10 @@
 Production toolkit for Canton Network validators — automated install, upgrades, backups, and monitoring. Built from real validator operations on MainNet, TestNet, and DevNet.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/web3validator/canton-validator-toolkit/main/install.sh | bash
+git clone https://github.com/web3validator/canton-validator-toolkit ~/canton-validator-toolkit && bash ~/canton-validator-toolkit/scripts/setup.sh
 ```
+
+> Already have it? `cd ~/canton-validator-toolkit && git pull && bash scripts/setup.sh`
 
 ---
 
@@ -39,15 +41,8 @@ sudo apt-get update && sudo apt-get install -y \
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/web3validator/canton-validator-toolkit/main/install.sh | bash
-```
-
-Or manually:
-
-```bash
 git clone https://github.com/web3validator/canton-validator-toolkit ~/canton-validator-toolkit
-chmod +x ~/canton-validator-toolkit/scripts/*.sh
-~/canton-validator-toolkit/scripts/setup.sh
+bash ~/canton-validator-toolkit/scripts/setup.sh
 ```
 
 The installer will ask you:
@@ -187,7 +182,7 @@ CANTON_NETWORK_NAME=splice-validator docker compose up -d
 
 ![Canton Validator Dashboard](docs/img/dashboard-overview.png)
 
-Dashboard includes 28 panels across 7 sections: Overview, Rewards & Economics, Network Health, Triggers, JVM, Database, System.
+Dashboard includes 38 panels across 8 sections: Overview, Rewards & Economics, Network Health, Participant, Triggers & Automations, JVM, Database, System.
 
 Prometheus scrapes `validator:10013` and `participant:10013` directly — not via nginx (standard Prometheus can't set custom `Host` headers).
 
@@ -216,12 +211,46 @@ Runs every 15 minutes via cron. Checks:
 - Retry failures
 - Disk space (<20GB free)
 
-One Telegram alert on failure, one on recovery — no spam.
-
 ```bash
 # Manual run
 ~/canton-validator-toolkit/scripts/check_health.sh
 ```
+
+---
+
+## Alerts
+
+Four notification channels — configure any combination, all independent.
+
+| Channel | Failure | Still failing | Recovery |
+|---------|---------|---------------|----------|
+| Telegram | send + **pin** | silent | **unpin** + resolved |
+| Discord | send | silent | resolved message |
+| Slack | send | silent | resolved message |
+| PagerDuty | trigger incident | silent (PD escalates) | resolve incident |
+
+No spam — one alert on failure, one on recovery.
+
+Configure via `setup.sh → Services → Health checks → Configure alert channels`, or set directly in `~/.canton/toolkit.conf`:
+
+```bash
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+PAGERDUTY_ROUTING_KEY=...
+```
+
+**Telegram** — create bot via [@BotFather](https://t.me/BotFather), get chat ID:
+```bash
+curl https://api.telegram.org/bot<TOKEN>/getUpdates
+```
+
+**Discord** — channel Settings → Integrations → Webhooks → New Webhook
+
+**Slack** — [api.slack.com/apps](https://api.slack.com/apps) → Incoming Webhooks → Add
+
+**PagerDuty** — Services → Integrations → Add Integration → Events API v2
 
 ---
 

@@ -14,13 +14,19 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "10.0.0"
+      "version": "9.0.0"
     },
     {
       "type": "datasource",
       "id": "prometheus",
       "name": "Prometheus",
       "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
     },
     {
       "type": "panel",
@@ -36,28 +42,25 @@
     },
     {
       "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
+      "id": "bargauge",
+      "name": "Bar gauge",
       "version": ""
     },
     {
       "type": "panel",
-      "id": "bargauge",
-      "name": "Bar gauge",
+      "id": "state-timeline",
+      "name": "State timeline",
       "version": ""
     }
   ],
-  "annotations": {
-    "list": []
-  },
-  "description": "Canton Network Validator — full monitoring dashboard (28 panels)",
+  "annotations": { "list": [] },
+  "description": "Canton Validator — full monitoring dashboard (docker-compose)",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
-
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
@@ -138,7 +141,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "(time() * 1000 - max(splice_store_last_ingested_record_time_ms)) / 1000",
+          "expr": "time() - max(splice_store_last_seen_record_time_ms) / 1000",
           "legendFormat": "Lag",
           "refId": "A"
         }
@@ -177,7 +180,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "increase(splice_trigger_completed_total{trigger_name=\"ReceiveFaucetCouponTrigger\"}[24h])",
+          "expr": "increase(splice_trigger_completed_total{job=\"canton-validator\",trigger_name=\"ReceiveFaucetCouponTrigger\",outcome=\"success\"}[24h])",
           "legendFormat": "Rewards",
           "refId": "A"
         }
@@ -225,33 +228,128 @@
 
     {
       "id": 5,
-      "title": "Version",
+      "title": "Validator Health",
       "type": "stat",
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
         "orientation": "auto",
-        "textMode": "name",
-        "colorMode": "none",
+        "textMode": "auto",
+        "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center"
       },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "fixed", "fixedColor": "text" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "INACTIVE", "color": "dark-red", "index": 1 },
+                "1": { "text": "ACTIVE", "color": "green", "index": 0 }
+              }
+            }
+          ],
           "thresholds": {
             "mode": "absolute",
-            "steps": [{ "color": "text", "value": null }]
-          }
+            "steps": [
+              { "color": "dark-red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
         },
         "overrides": []
       },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "target_info",
-          "legendFormat": "{{canton_version}}",
+          "expr": "up{job=\"canton-validator\"}",
+          "legendFormat": "validator",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 6,
+      "title": "Participant Health",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "INACTIVE", "color": "dark-red", "index": 1 },
+                "1": { "text": "ACTIVE", "color": "green", "index": 0 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "dark-red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "min(daml_health_status{job=\"canton-participant\"})",
+          "legendFormat": "participant",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 201,
+      "title": "Sync Lag History",
+      "type": "timeseries",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 60 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "time() - max(splice_store_last_seen_record_time_ms) / 1000",
+          "legendFormat": "Sync Lag (s)",
           "refId": "A"
         }
       ]
@@ -259,17 +357,17 @@
 
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 10 },
       "id": 101,
       "title": "Rewards & Economics",
       "type": "row"
     },
 
     {
-      "id": 6,
+      "id": 7,
       "title": "Reward Rate /h",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 6 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -286,7 +384,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "rate(splice_trigger_completed_total{trigger_name=\"ReceiveFaucetCouponTrigger\"}[1h]) * 3600",
+          "expr": "rate(splice_trigger_completed_total{job=\"canton-validator\",trigger_name=\"ReceiveFaucetCouponTrigger\",outcome=\"success\"}[1h]) * 3600",
           "legendFormat": "rewards/h",
           "refId": "A"
         }
@@ -294,10 +392,10 @@
     },
 
     {
-      "id": 7,
+      "id": 8,
       "title": "Balance History",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 6 },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -324,53 +422,17 @@
 
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
       "id": 102,
       "title": "Network Health",
       "type": "row"
     },
 
     {
-      "id": 8,
-      "title": "Processing Lag ms",
-      "type": "timeseries",
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 14 },
-      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-      "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "list", "placement": "bottom" }
-      },
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ms",
-          "custom": { "lineWidth": 1, "fillOpacity": 10 },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              { "color": "green", "value": null },
-              { "color": "yellow", "value": 30000 },
-              { "color": "red", "value": 60000 }
-            ]
-          },
-          "color": { "mode": "palette-classic" }
-        },
-        "overrides": []
-      },
-      "targets": [
-        {
-          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "max(splice_store_last_seen_record_time_ms) - max(splice_store_last_ingested_record_time_ms)",
-          "legendFormat": "Processing lag",
-          "refId": "A"
-        }
-      ]
-    },
-
-    {
       "id": 9,
       "title": "TX Throughput",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 14 },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -397,21 +459,17 @@
     {
       "id": 10,
       "title": "gRPC Errors",
-      "type": "stat",
-      "gridPos": { "h": 7, "w": 4, "x": 16, "y": 14 },
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
-        "orientation": "auto",
-        "textMode": "auto",
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center"
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "decimals": 0,
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -419,7 +477,7 @@
               { "color": "red", "value": 1 }
             ]
           },
-          "color": { "mode": "thresholds" }
+          "color": { "mode": "fixed", "fixedColor": "red" }
         },
         "overrides": []
       },
@@ -427,7 +485,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
           "expr": "increase(daml_grpc_client_completed_total{grpc_code!=\"OK\"}[5m])",
-          "legendFormat": "gRPC errors",
+          "legendFormat": "{{grpc_code}} {{grpc_method}}",
           "refId": "A"
         }
       ]
@@ -437,7 +495,7 @@
       "id": 11,
       "title": "Active Contracts by Store",
       "type": "bargauge",
-      "gridPos": { "h": 7, "w": 4, "x": 20, "y": 14 },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 19 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
@@ -469,45 +527,173 @@
 
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 21 },
-      "id": 103,
-      "title": "Triggers",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 },
+      "id": 107,
+      "title": "Participant",
       "type": "row"
     },
 
     {
-      "id": 12,
-      "title": "All Triggers Rate",
-      "type": "timeseries",
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 22 },
+      "id": 30,
+      "title": "Health Status Timeline",
+      "type": "state-timeline",
+      "gridPos": { "h": 5, "w": 24, "x": 0, "y": 27 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
-        "tooltip": { "mode": "multi" },
-        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+        "colWidth": 1,
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "rowHeight": 0.8,
+        "showValue": "never",
+        "tooltip": { "mode": "single", "sort": "none" }
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "ops",
-          "custom": { "lineWidth": 1, "fillOpacity": 5 },
-          "color": { "mode": "palette-classic" }
+          "custom": { "fillOpacity": 70, "lineWidth": 0 },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "inactive", "color": "dark-red", "index": 1 },
+                "1": { "text": "active", "color": "green", "index": 0 }
+              }
+            }
+          ],
+          "max": 1,
+          "min": 0,
+          "noValue": "0",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "dark-red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
         },
         "overrides": []
       },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "rate(splice_trigger_completed_total[5m])",
-          "legendFormat": "{{trigger_name}}",
+          "expr": "daml_health_status",
+          "legendFormat": "{{node}} — {{component}}",
           "refId": "A"
         }
       ]
     },
 
     {
-      "id": 13,
-      "title": "Failed / Noop Triggers",
+      "id": 31,
+      "title": "Sequencer Client Delay",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 22 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 30 },
+              { "color": "red", "value": 120 }
+            ]
+          },
+          "color": { "mode": "thresholds" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "daml_sequencer_client_handler_delay{component=\"participant\"}",
+          "legendFormat": "delay",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "daml_sequencer_client_handler_delay_per_connection{component=\"participant\"}",
+          "legendFormat": "delay per connection",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "id": 32,
+      "title": "Submissions In Flight",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "daml_sequencer_client_submissions_in_flight{component=\"participant\"}",
+          "legendFormat": "in flight",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 33,
+      "title": "Dropped Submissions",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 20 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          },
+          "color": { "mode": "fixed", "fixedColor": "red" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "increase(daml_sequencer_client_submissions_dropped{component=\"participant\"}[1m])",
+          "legendFormat": "dropped/min",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 34,
+      "title": "Sequencer Events Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 39 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -524,18 +710,179 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "rate(splice_trigger_attempted_total[5m]) - rate(splice_trigger_completed_total{outcome=\"success\"}[5m])",
-          "legendFormat": "{{trigger_name}}",
+          "expr": "rate(daml_sequencer_client_handler_sequencer_events{component=\"participant\"}[$__rate_interval])",
+          "legendFormat": "events/s",
           "refId": "A"
         }
       ]
     },
 
     {
-      "id": 14,
+      "id": 35,
+      "title": "Event Batches In Flight",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 39 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "daml_sequencer_client_handler_max_in_flight_event_batches{component=\"participant\"}",
+          "legendFormat": "max in flight",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "daml_sequencer_client_handler_actual_in_flight_event_batches{component=\"participant\"}",
+          "legendFormat": "actual in flight",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 },
+      "id": 103,
+      "title": "Triggers & Automations",
+      "type": "row"
+    },
+
+    {
+      "id": 40,
+      "title": "Trigger Runs",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "rate(splice_trigger_completed_total{outcome=~\"success|failure\"}[$__rate_interval])",
+          "legendFormat": "{{trigger_name}} — {{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 41,
+      "title": "Trigger Attempts",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 1, "fillOpacity": 5 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum(rate(splice_trigger_attempted_total[$__rate_interval]))",
+          "legendFormat": "total attempts",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum(rate(splice_trigger_attempted_total{contentionFailure=\"true\"}[$__rate_interval]))",
+          "legendFormat": "contention failures",
+          "refId": "B"
+        }
+      ]
+    },
+
+    {
+      "id": 42,
+      "title": "Failed Triggers — Contention Errors",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 54 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum by(trigger_name, node_type) (rate(splice_trigger_attempted_total{contentionFailure=\"true\"}[$__rate_interval]))",
+          "legendFormat": "{{node_type}} — {{trigger_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 43,
+      "title": "Failed Triggers — Non-Contention Errors",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 54 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": { "lineWidth": 1, "fillOpacity": 10 },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum by(trigger_name, node_type) (rate(splice_trigger_attempted_total{statusCode!~\"OK\", contentionFailure=\"false\"}[$__rate_interval]))",
+          "legendFormat": "{{node_type}} — {{trigger_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
+      "id": 44,
       "title": "Trigger Latency p95",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 22 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 61 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -552,7 +899,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "histogram_quantile(0.95, rate(splice_trigger_latency_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(splice_trigger_latency_duration_seconds_bucket[$__rate_interval]))",
           "legendFormat": "{{trigger_name}} p95",
           "refId": "A"
         }
@@ -560,8 +907,37 @@
     },
 
     {
+      "id": 45,
+      "title": "Retry Failures Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 61 },
+      "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+      "options": {
+        "tooltip": { "mode": "multi" },
+        "legend": { "displayMode": "list", "placement": "bottom" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "custom": { "lineWidth": 2, "fillOpacity": 10 },
+          "color": { "mode": "fixed", "fixedColor": "red" }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum(splice_retries_failures)",
+          "legendFormat": "retry failures total",
+          "refId": "A"
+        }
+      ]
+    },
+
+    {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 29 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 68 },
       "id": 104,
       "title": "JVM",
       "type": "row"
@@ -571,7 +947,7 @@
       "id": 15,
       "title": "Heap %",
       "type": "gauge",
-      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 30 },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 69 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
@@ -610,7 +986,7 @@
       "id": 16,
       "title": "JVM CPU %",
       "type": "timeseries",
-      "gridPos": { "h": 5, "w": 8, "x": 4, "y": 30 },
+      "gridPos": { "h": 5, "w": 8, "x": 4, "y": 69 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -640,7 +1016,7 @@
       "id": 17,
       "title": "GC Time/s",
       "type": "timeseries",
-      "gridPos": { "h": 5, "w": 8, "x": 12, "y": 30 },
+      "gridPos": { "h": 5, "w": 8, "x": 12, "y": 69 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -668,7 +1044,7 @@
       "id": 18,
       "title": "Threads",
       "type": "stat",
-      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 30 },
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 69 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
@@ -692,7 +1068,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "jvm_thread_count",
+          "expr": "sum by(job) (jvm_thread_count)",
           "legendFormat": "{{job}}",
           "refId": "A"
         }
@@ -701,7 +1077,7 @@
 
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 74 },
       "id": 105,
       "title": "Database",
       "type": "row"
@@ -711,7 +1087,7 @@
       "id": 19,
       "title": "DB Executor Load",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 36 },
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 75 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -728,9 +1104,15 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "cn_db_storage_general_executor_load",
-          "legendFormat": "{{job}} load",
+          "expr": "sum by(job) (cn_db_storage_general_executor_load)",
+          "legendFormat": "{{job}}",
           "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum by(job) (daml_db_storage_general_executor_load)",
+          "legendFormat": "{{job}}",
+          "refId": "B"
         }
       ]
     },
@@ -739,7 +1121,7 @@
       "id": 20,
       "title": "DB Queue Depth",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 36 },
+      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 75 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -756,9 +1138,15 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "cn_db_storage_general_executor_queued",
-          "legendFormat": "{{job}} queued",
+          "expr": "sum by(job) (cn_db_storage_general_executor_queued)",
+          "legendFormat": "{{job}}",
           "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum by(job) (daml_db_storage_general_executor_queued)",
+          "legendFormat": "{{job}}",
+          "refId": "B"
         }
       ]
     },
@@ -767,7 +1155,7 @@
       "id": 21,
       "title": "DB Pool %",
       "type": "gauge",
-      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 36 },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 75 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
@@ -795,7 +1183,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "db_client_connections_usage / db_client_connections_max * 100",
+          "expr": "sum(db_client_connections_usage{state=\"used\"}) / sum(db_client_connections_max) * 100",
           "legendFormat": "DB Pool",
           "refId": "A"
         }
@@ -806,7 +1194,7 @@
       "id": 22,
       "title": "DB Exec Time/s",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 36 },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 75 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -823,16 +1211,22 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
-          "expr": "rate(cn_db_storage_general_executor_exectime_duration_seconds_sum[5m])",
-          "legendFormat": "{{job}} exec",
+          "expr": "sum by(job) (rate(cn_db_storage_general_executor_exectime_duration_seconds_sum[5m]))",
+          "legendFormat": "{{job}}",
           "refId": "A"
+        },
+        {
+          "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
+          "expr": "sum by(job) (rate(daml_db_storage_general_executor_exectime_duration_seconds_sum[5m]))",
+          "legendFormat": "{{job}}",
+          "refId": "B"
         }
       ]
     },
 
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 43 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 82 },
       "id": 106,
       "title": "System",
       "type": "row"
@@ -842,7 +1236,7 @@
       "id": 23,
       "title": "CPU %",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 44 },
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 83 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -880,7 +1274,7 @@
       "id": 24,
       "title": "RAM %",
       "type": "gauge",
-      "gridPos": { "h": 7, "w": 4, "x": 8, "y": 44 },
+      "gridPos": { "h": 7, "w": 4, "x": 8, "y": 83 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
@@ -919,7 +1313,7 @@
       "id": 25,
       "title": "Disk Free",
       "type": "gauge",
-      "gridPos": { "h": 7, "w": 4, "x": 12, "y": 44 },
+      "gridPos": { "h": 7, "w": 4, "x": 12, "y": 83 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "reduceOptions": { "calcs": ["lastNotNull"] },
@@ -956,7 +1350,7 @@
       "id": 26,
       "title": "Network In/Out",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 44 },
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 83 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -990,7 +1384,7 @@
       "id": 27,
       "title": "Load Average",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 51 },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 90 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -1030,7 +1424,7 @@
       "id": 28,
       "title": "Disk I/O %",
       "type": "timeseries",
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 51 },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 90 },
       "datasource": { "type": "prometheus", "uid": "canton-prometheus" },
       "options": {
         "tooltip": { "mode": "multi" },
@@ -1055,16 +1449,15 @@
         }
       ]
     }
-
   ],
   "refresh": "30s",
   "schemaVersion": 38,
-  "tags": ["canton", "validator", "posthuman"],
+  "tags": ["canton", "validator"],
   "templating": { "list": [] },
   "time": { "from": "now-3h", "to": "now" },
   "timepicker": {},
   "timezone": "browser",
   "title": "Canton Validator",
-  "uid": "canton-validator-v1",
-  "version": 1
+  "uid": "canton-validator",
+  "version": 2
 }

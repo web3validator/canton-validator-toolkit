@@ -28,14 +28,25 @@ die()     { error "$1"; exit 1; }
 # Dependency check
 # ============================================================
 check_deps() {
+    # OS check
+    if [ "$(uname -s)" != "Linux" ]; then
+        die "Only Linux is supported"
+    fi
+
     local missing=()
-    for cmd in docker curl jq python3 openssl rsync; do
+    for cmd in docker curl jq python3 openssl rsync git; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     docker compose version &>/dev/null || missing+=("docker-compose-plugin")
 
     if [ ${#missing[@]} -gt 0 ]; then
-        die "Missing dependencies: ${missing[*]}\nInstall with: sudo apt-get install -y ${missing[*]}"
+        echo ""
+        error "Missing dependencies: ${missing[*]}"
+        echo ""
+        echo "  Install with:"
+        echo "    sudo apt-get update && sudo apt-get install -y ${missing[*]}"
+        echo ""
+        exit 1
     fi
     success "All dependencies satisfied"
 }
@@ -355,20 +366,539 @@ main_menu() {
     echo "  1) Install Canton validator (fresh setup)"
     echo "  2) Update to latest version"
     echo "  3) Show status"
-    echo "  4) Advanced options"
-    echo "  5) Exit"
+    echo "  4) Services (auto-upgrade / backup / health / monitoring)"
+    echo "  5) Advanced options"
+    echo "  6) Exit"
     echo ""
     local choice
-    read -rp "$(echo -e "${BOLD}Choice [1-5]${NC}: ")" choice
+    read -rp "$(echo -e "${BOLD}Choice [1-6]${NC}: ")" choice
 
     case "$choice" in
         1) mode_install ;;
         2) mode_update ;;
         3) mode_status ;;
-        4) mode_advanced ;;
-        5) exit 0 ;;
+        4) mode_services ;;
+        5) mode_advanced ;;
+        6) exit 0 ;;
         *) die "Invalid choice" ;;
     esac
+}
+
+# ============================================================
+# Mode: SERVICES
+# ============================================================
+mode_services() {
+    if [ ! -f "$TOOLKIT_CONF" ]; then
+        warn "Not installed — toolkit.conf not found"
+        read -rp "$(echo -e "${BOLD}Press Enter to return${NC}")"
+        main_menu
+        return
+    fi
+    source "$TOOLKIT_CONF"
+
+    while true; do
+        # --- collect live statuses ---
+        local au_status bu_status hc_status mon_status
+
+        # auto-upgrade
+        if crontab -l 2>/dev/null | grep -q "auto_upgrade.sh"; then
+            au_status="${GREEN}enabled${NC}"
+        else
+            au_status="${RED}disabled${NC}"
+        fi
+
+        # backup
+        if [ "${BACKUP_TYPE:-skip}" = "skip" ]; then
+            bu_status="${RED}skip${NC}"
+        elif crontab -l 2>/dev/null | grep -q "backup.sh"; then
+            bu_status="${GREEN}${BACKUP_TYPE} (cron)${NC}"
+        else
+            bu_status="${YELLOW}${BACKUP_TYPE} (no cron)${NC}"
+        fi
+
+        # health check
+        if crontab -l 2>/dev/null | grep -q "check_health.sh"; then
+            hc_status="${GREEN}enabled${NC}"
+        else
+            hc_status="${RED}disabled${NC}"
+        fi
+
+        # monitoring
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "canton-grafana\|canton-prometheus"; then
+            mon_status="${GREEN}running${NC}"
+        else
+            mon_status="${RED}stopped${NC}"
+        fi
+
+        echo ""
+        echo -e "${BOLD}═══════════════════ Services ═══════════════════${NC}"
+        echo ""
+        echo -e "  1) Auto-upgrade    [ $(echo -e "$au_status") ]"
+        echo -e "  2) Backup          [ $(echo -e "$bu_status") ]"
+        echo -e "  3) Health checks   [ $(echo -e "$hc_status") ]"
+        echo -e "  4) Monitoring      [ $(echo -e "$mon_status") ]"
+        echo "  5) Back"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Choice [1-5]${NC}: ")" choice
+
+        case "$choice" in
+            1) _svc_autoupgrade ;;
+            2) _svc_backup ;;
+            3) _svc_health ;;
+            4) _svc_monitoring ;;
+            5) main_menu; return ;;
+            *) warn "Invalid choice" ;;
+        esac
+    done
+}
+
+# ── auto-upgrade ─────────────────────────────────────────────
+_svc_autoupgrade() {
+    echo ""
+    echo -e "${BOLD}─── Auto-upgrade ────────────────────────────────${NC}"
+    echo ""
+    if crontab -l 2>/dev/null | grep -q "auto_upgrade.sh"; then
+        echo -e "  Status: ${GREEN}enabled${NC} (cron daily 22:00)"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Disable auto-upgrade? [y/N]${NC}: ")" choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            _cron_remove "auto_upgrade.sh"
+            sed -i "s|^AUTO_UPGRADE=.*|AUTO_UPGRADE=false|" "$TOOLKIT_CONF"
+            AUTO_UPGRADE="false"
+            success "Auto-upgrade disabled"
+        fi
+    else
+        echo -e "  Status: ${RED}disabled${NC}"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Enable auto-upgrade (cron daily 22:00)? [y/N]${NC}: ")" choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            _cron_add "0 22 * * * $TOOLKIT_DIR/scripts/auto_upgrade.sh >> $LOG_DIR/upgrade.log 2>&1" "auto_upgrade.sh"
+            sed -i "s|^AUTO_UPGRADE=.*|AUTO_UPGRADE=true|" "$TOOLKIT_CONF"
+            AUTO_UPGRADE="true"
+            success "Auto-upgrade enabled (daily 22:00)"
+        fi
+    fi
+}
+
+# ── backup ───────────────────────────────────────────────────
+_svc_backup() {
+    echo ""
+    echo -e "${BOLD}─── Backup ──────────────────────────────────────${NC}"
+    echo ""
+    echo -e "  Current type : ${BOLD}${BACKUP_TYPE:-skip}${NC}"
+    if crontab -l 2>/dev/null | grep -q "backup.sh"; then
+        echo -e "  Cron         : ${GREEN}every 4h${NC}"
+    else
+        echo -e "  Cron         : ${RED}not scheduled${NC}"
+    fi
+    echo ""
+    echo "  1) Enable rsync backup"
+    echo "  2) Enable Cloudflare R2 backup"
+    echo "  3) Disable backup"
+    echo "  4) Back"
+    echo ""
+    local choice
+    read -rp "$(echo -e "${BOLD}Choice [1-4]${NC}: ")" choice
+
+    case "$choice" in
+        1)
+            BACKUP_TYPE="rsync"
+            prompt REMOTE_HOST "Remote host (user@host)" "${REMOTE_HOST:-}"
+            prompt REMOTE_PATH "Remote path" "${REMOTE_PATH:-~/canton-backups/$NETWORK}"
+            R2_BUCKET=""; R2_ACCOUNT_ID=""; R2_ACCESS_KEY=""; R2_SECRET_KEY=""
+            local ret_input
+            prompt ret_input "Retention (days)" "${RETENTION_DAYS:-1}"
+            [[ "$ret_input" =~ ^[0-9]+$ ]] && RETENTION_DAYS="$ret_input" || RETENTION_DAYS="1"
+            _backup_save_conf
+            _cron_add "0 */4 * * * $TOOLKIT_DIR/scripts/backup.sh >> $LOG_DIR/backup.log 2>&1" "backup.sh"
+            success "rsync backup enabled (every 4h)"
+            ;;
+        2)
+            BACKUP_TYPE="r2"
+            prompt R2_BUCKET     "R2 bucket name"  "${R2_BUCKET:-}"
+            prompt R2_ACCOUNT_ID "R2 account ID"   "${R2_ACCOUNT_ID:-}"
+            prompt R2_ACCESS_KEY "R2 access key"   "${R2_ACCESS_KEY:-}"
+            prompt_secret R2_SECRET_KEY "R2 secret key"
+            REMOTE_HOST=""; REMOTE_PATH=""
+            local ret_input
+            prompt ret_input "Retention (days)" "${RETENTION_DAYS:-1}"
+            [[ "$ret_input" =~ ^[0-9]+$ ]] && RETENTION_DAYS="$ret_input" || RETENTION_DAYS="1"
+            _backup_save_conf
+            _cron_add "0 */4 * * * $TOOLKIT_DIR/scripts/backup.sh >> $LOG_DIR/backup.log 2>&1" "backup.sh"
+            success "R2 backup enabled (every 4h)"
+            ;;
+        3)
+            _cron_remove "backup.sh"
+            BACKUP_TYPE="skip"
+            sed -i "s|^BACKUP_TYPE=.*|BACKUP_TYPE=skip|" "$TOOLKIT_CONF"
+            success "Backup disabled"
+            ;;
+        4) return ;;
+    esac
+}
+
+_backup_save_conf() {
+    sed -i "s|^BACKUP_TYPE=.*|BACKUP_TYPE=${BACKUP_TYPE}|"         "$TOOLKIT_CONF"
+    sed -i "s|^REMOTE_HOST=.*|REMOTE_HOST=${REMOTE_HOST:-}|"       "$TOOLKIT_CONF"
+    sed -i "s|^REMOTE_PATH=.*|REMOTE_PATH=${REMOTE_PATH:-}|"       "$TOOLKIT_CONF"
+    sed -i "s|^R2_BUCKET=.*|R2_BUCKET=${R2_BUCKET:-}|"             "$TOOLKIT_CONF"
+    sed -i "s|^R2_ACCOUNT_ID=.*|R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}|" "$TOOLKIT_CONF"
+    sed -i "s|^R2_ACCESS_KEY=.*|R2_ACCESS_KEY=${R2_ACCESS_KEY:-}|" "$TOOLKIT_CONF"
+    sed -i "s|^R2_SECRET_KEY=.*|R2_SECRET_KEY=${R2_SECRET_KEY:-}|" "$TOOLKIT_CONF"
+    sed -i "s|^RETENTION_DAYS=.*|RETENTION_DAYS=${RETENTION_DAYS}|" "$TOOLKIT_CONF"
+}
+
+# ── health checks ────────────────────────────────────────────
+_svc_health() {
+    echo ""
+    echo -e "${BOLD}─── Health Checks ───────────────────────────────${NC}"
+    echo ""
+
+    # Show alert channels status
+    local any_alerts=false
+    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ] \
+        && echo -e "  Telegram  : ${GREEN}configured${NC}" && any_alerts=true \
+        || echo -e "  Telegram  : ${YELLOW}not configured${NC}"
+    [ -n "${DISCORD_WEBHOOK_URL:-}" ] \
+        && echo -e "  Discord   : ${GREEN}configured${NC}" && any_alerts=true \
+        || echo -e "  Discord   : ${YELLOW}not configured${NC}"
+    [ -n "${SLACK_WEBHOOK_URL:-}" ] \
+        && echo -e "  Slack     : ${GREEN}configured${NC}" && any_alerts=true \
+        || echo -e "  Slack     : ${YELLOW}not configured${NC}"
+    [ -n "${PAGERDUTY_ROUTING_KEY:-}" ] \
+        && echo -e "  PagerDuty : ${GREEN}configured${NC}" && any_alerts=true \
+        || echo -e "  PagerDuty : ${YELLOW}not configured${NC}"
+    if [ "$any_alerts" = false ]; then
+        echo ""
+        warn "No alert channels configured — alerts go to log only: $LOG_DIR/health.log"
+    fi
+    echo ""
+
+    if crontab -l 2>/dev/null | grep -q "check_health.sh"; then
+        echo -e "  Status: ${GREEN}enabled${NC} (cron every 15 min)"
+        echo ""
+        echo "  1) Disable health checks"
+        echo "  2) Configure alert channels"
+        echo "  3) Back"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+        case "$choice" in
+            1)
+                _cron_remove "check_health.sh"
+                success "Health checks disabled"
+                ;;
+            2) _svc_health_alerts ;;
+            3) return ;;
+        esac
+    else
+        echo -e "  Status: ${RED}disabled${NC}"
+        echo ""
+        echo "  1) Enable health checks (every 15 min)"
+        echo "  2) Configure alert channels"
+        echo "  3) Back"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+        case "$choice" in
+            1)
+                _cron_add "*/15 * * * * $TOOLKIT_DIR/scripts/check_health.sh >> $LOG_DIR/health.log 2>&1" "check_health.sh"
+                success "Health checks enabled (every 15 min)"
+                if [ "$any_alerts" = false ]; then
+                    echo ""
+                    warn "No alert channels configured — alerts will only appear in $LOG_DIR/health.log"
+                    echo -e "  Configure via option 2 in this menu"
+                fi
+                ;;
+            2) _svc_health_alerts ;;
+            3) return ;;
+        esac
+    fi
+}
+
+_svc_health_alerts() {
+    while true; do
+        source "$TOOLKIT_CONF"
+        echo ""
+        echo -e "${BOLD}─── Alert Channels ──────────────────────────────${NC}"
+        echo ""
+        local tg_st dc_st sl_st pd_st
+        [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ] \
+            && tg_st="${GREEN}configured${NC}" || tg_st="${YELLOW}not set${NC}"
+        [ -n "${DISCORD_WEBHOOK_URL:-}" ] \
+            && dc_st="${GREEN}configured${NC}" || dc_st="${YELLOW}not set${NC}"
+        [ -n "${SLACK_WEBHOOK_URL:-}" ] \
+            && sl_st="${GREEN}configured${NC}" || sl_st="${YELLOW}not set${NC}"
+        [ -n "${PAGERDUTY_ROUTING_KEY:-}" ] \
+            && pd_st="${GREEN}configured${NC}" || pd_st="${YELLOW}not set${NC}"
+
+        echo -e "  1) Telegram   [ $(echo -e "$tg_st") ]"
+        echo -e "  2) Discord    [ $(echo -e "$dc_st") ]"
+        echo -e "  3) Slack      [ $(echo -e "$sl_st") ]"
+        echo -e "  4) PagerDuty  [ $(echo -e "$pd_st") ]"
+        echo "  5) Back"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Choice [1-5]${NC}: ")" choice
+        case "$choice" in
+            1) _alert_configure_telegram ;;
+            2) _alert_configure_discord ;;
+            3) _alert_configure_slack ;;
+            4) _alert_configure_pagerduty ;;
+            5) return ;;
+            *) warn "Invalid choice" ;;
+        esac
+    done
+}
+
+_alert_configure_telegram() {
+    echo ""
+    echo -e "${BOLD}─── Telegram ────────────────────────────────────${NC}"
+    echo ""
+    [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && echo -e "  Token  : ${BOLD}${TELEGRAM_BOT_TOKEN:0:10}...${NC}"
+    [ -n "${TELEGRAM_CHAT_ID:-}" ]   && echo -e "  Chat ID: ${BOLD}${TELEGRAM_CHAT_ID}${NC}"
+    echo ""
+    echo -e "  Create bot : ${BLUE}https://t.me/BotFather${NC}"
+    echo -e "  Get chat ID: curl https://api.telegram.org/bot<TOKEN>/getUpdates"
+    echo ""
+    echo "  1) Configure"
+    echo "  2) Disable (clear)"
+    echo "  3) Back"
+    echo ""
+    local choice
+    read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+    case "$choice" in
+        1)
+            local token chat_id
+            prompt token   "Bot token"  "${TELEGRAM_BOT_TOKEN:-}"
+            prompt chat_id "Chat ID"    "${TELEGRAM_CHAT_ID:-}"
+            if [ -n "$token" ] && [ -n "$chat_id" ]; then
+                sed -i "s|^TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=${token}|"  "$TOOLKIT_CONF"
+                sed -i "s|^TELEGRAM_CHAT_ID=.*|TELEGRAM_CHAT_ID=${chat_id}|"    "$TOOLKIT_CONF"
+                TELEGRAM_BOT_TOKEN="$token"; TELEGRAM_CHAT_ID="$chat_id"
+                local resp
+                resp=$(curl -s -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+                    -d chat_id="${chat_id}" -d parse_mode="HTML" \
+                    -d text="✅ <b>${NODE_NAME:-Canton Validator}</b> — Telegram alerts configured" 2>/dev/null)
+                echo "$resp" | grep -q '"ok":true' \
+                    && success "Telegram configured + test message sent" \
+                    || warn "Saved but test message failed — check token/chat ID"
+            fi
+            ;;
+        2)
+            sed -i "s|^TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=|" "$TOOLKIT_CONF"
+            sed -i "s|^TELEGRAM_CHAT_ID=.*|TELEGRAM_CHAT_ID=|"     "$TOOLKIT_CONF"
+            TELEGRAM_BOT_TOKEN=""; TELEGRAM_CHAT_ID=""
+            success "Telegram alerts disabled"
+            ;;
+        3) return ;;
+    esac
+}
+
+_alert_configure_discord() {
+    echo ""
+    echo -e "${BOLD}─── Discord ─────────────────────────────────────${NC}"
+    echo ""
+    [ -n "${DISCORD_WEBHOOK_URL:-}" ] && echo -e "  Webhook: ${BOLD}${DISCORD_WEBHOOK_URL:0:40}...${NC}"
+    echo ""
+    echo -e "  Get webhook: Discord channel → Edit → Integrations → Webhooks"
+    echo ""
+    echo "  1) Configure"
+    echo "  2) Disable (clear)"
+    echo "  3) Back"
+    echo ""
+    local choice
+    read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+    case "$choice" in
+        1)
+            local url
+            prompt url "Webhook URL" "${DISCORD_WEBHOOK_URL:-}"
+            if [ -n "$url" ]; then
+                sed -i "s|^DISCORD_WEBHOOK_URL=.*|DISCORD_WEBHOOK_URL=${url}|" "$TOOLKIT_CONF"
+                DISCORD_WEBHOOK_URL="$url"
+                local resp
+                resp=$(curl -s -X POST "$url" -H "Content-Type: application/json" \
+                    -d "{\"content\": \"✅ **${NODE_NAME:-Canton Validator}** — Discord alerts configured\"}" 2>/dev/null)
+                echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('id') or d == {} else 1)" 2>/dev/null \
+                    && success "Discord configured + test message sent" \
+                    || warn "Saved but test message failed — check webhook URL"
+            fi
+            ;;
+        2)
+            sed -i "s|^DISCORD_WEBHOOK_URL=.*|DISCORD_WEBHOOK_URL=|" "$TOOLKIT_CONF"
+            DISCORD_WEBHOOK_URL=""
+            success "Discord alerts disabled"
+            ;;
+        3) return ;;
+    esac
+}
+
+_alert_configure_slack() {
+    echo ""
+    echo -e "${BOLD}─── Slack ───────────────────────────────────────${NC}"
+    echo ""
+    [ -n "${SLACK_WEBHOOK_URL:-}" ] && echo -e "  Webhook: ${BOLD}${SLACK_WEBHOOK_URL:0:40}...${NC}"
+    echo ""
+    echo -e "  Get webhook: ${BLUE}https://api.slack.com/apps${NC} → Incoming Webhooks"
+    echo ""
+    echo "  1) Configure"
+    echo "  2) Disable (clear)"
+    echo "  3) Back"
+    echo ""
+    local choice
+    read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+    case "$choice" in
+        1)
+            local url
+            prompt url "Webhook URL" "${SLACK_WEBHOOK_URL:-}"
+            if [ -n "$url" ]; then
+                sed -i "s|^SLACK_WEBHOOK_URL=.*|SLACK_WEBHOOK_URL=${url}|" "$TOOLKIT_CONF"
+                SLACK_WEBHOOK_URL="$url"
+                local resp
+                resp=$(curl -s -X POST "$url" -H "Content-Type: application/json" \
+                    -d "{\"text\": \"✅ *${NODE_NAME:-Canton Validator}* — Slack alerts configured\"}" 2>/dev/null)
+                [ "$resp" = "ok" ] \
+                    && success "Slack configured + test message sent" \
+                    || warn "Saved but test message failed — check webhook URL"
+            fi
+            ;;
+        2)
+            sed -i "s|^SLACK_WEBHOOK_URL=.*|SLACK_WEBHOOK_URL=|" "$TOOLKIT_CONF"
+            SLACK_WEBHOOK_URL=""
+            success "Slack alerts disabled"
+            ;;
+        3) return ;;
+    esac
+}
+
+_alert_configure_pagerduty() {
+    echo ""
+    echo -e "${BOLD}─── PagerDuty ───────────────────────────────────${NC}"
+    echo ""
+    [ -n "${PAGERDUTY_ROUTING_KEY:-}" ] && echo -e "  Routing key: ${BOLD}${PAGERDUTY_ROUTING_KEY:0:10}...${NC}"
+    echo ""
+    echo -e "  Get key: PagerDuty → Services → Integrations → Events API v2"
+    echo -e "  ${BLUE}https://support.pagerduty.com/docs/services-and-integrations${NC}"
+    echo ""
+    echo "  1) Configure"
+    echo "  2) Disable (clear)"
+    echo "  3) Back"
+    echo ""
+    local choice
+    read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+    case "$choice" in
+        1)
+            local key
+            prompt key "Routing key" "${PAGERDUTY_ROUTING_KEY:-}"
+            if [ -n "$key" ]; then
+                sed -i "s|^PAGERDUTY_ROUTING_KEY=.*|PAGERDUTY_ROUTING_KEY=${key}|" "$TOOLKIT_CONF"
+                PAGERDUTY_ROUTING_KEY="$key"
+                local resp
+                resp=$(curl -s -X POST "https://events.pagerduty.com/v2/enqueue" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"routing_key\":\"${key}\",\"event_action\":\"trigger\",\"dedup_key\":\"canton-test-$(hostname)\",\"payload\":{\"summary\":\"Canton Validator — PagerDuty alerts configured\",\"source\":\"$(hostname)\",\"severity\":\"info\"}}" 2>/dev/null)
+                echo "$resp" | grep -q '"status":"success"' \
+                    && success "PagerDuty configured + test event sent" \
+                    || warn "Saved but test event failed — check routing key"
+            fi
+            ;;
+        2)
+            sed -i "s|^PAGERDUTY_ROUTING_KEY=.*|PAGERDUTY_ROUTING_KEY=|" "$TOOLKIT_CONF"
+            PAGERDUTY_ROUTING_KEY=""
+            success "PagerDuty alerts disabled"
+            ;;
+        3) return ;;
+    esac
+}
+
+# ── monitoring ───────────────────────────────────────────────
+_svc_monitoring() {
+    source "$TOOLKIT_CONF"
+    echo ""
+    echo -e "${BOLD}─── Monitoring ──────────────────────────────────${NC}"
+    echo ""
+
+    local running=false
+    docker ps --format '{{.Names}}' 2>/dev/null | grep -q "canton-grafana\|canton-prometheus" && running=true
+
+    if [ "$running" = "true" ]; then
+        echo -e "  Status: ${GREEN}running${NC}"
+        echo -e "  Grafana: http://localhost:3001"
+        [ -n "${TAILSCALE_IP:-}" ] && echo -e "  Tailscale: http://${TAILSCALE_IP}:3001"
+        echo ""
+        echo "  1) Stop monitoring"
+        echo "  2) Restart monitoring"
+        echo "  3) Back"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+        case "$choice" in
+            1)
+                cd "$TOOLKIT_DIR/monitoring"
+                CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}" docker compose down
+                sed -i "s|^MONITORING=.*|MONITORING=false|" "$TOOLKIT_CONF"
+                success "Monitoring stopped"
+                ;;
+            2)
+                cd "$TOOLKIT_DIR/monitoring"
+                CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}" docker compose restart
+                success "Monitoring restarted"
+                ;;
+            3) return ;;
+        esac
+    else
+        echo -e "  Status: ${RED}stopped${NC}"
+        echo ""
+        echo "  1) Start monitoring"
+        echo "  2) Start + configure Tailscale"
+        echo "  3) Back"
+        echo ""
+        local choice
+        read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" choice
+        case "$choice" in
+            1)
+                MONITORING="true"
+                install_monitoring
+                sed -i "s|^MONITORING=.*|MONITORING=true|" "$TOOLKIT_CONF"
+                ;;
+            2)
+                MONITORING="true"
+                TAILSCALE="true"
+                echo ""
+                echo -e "  Get auth key: ${BLUE}https://login.tailscale.com/admin/settings/keys${NC}"
+                prompt TAILSCALE_AUTHKEY "Auth key (tskey-auth-..., or empty for browser auth)" "${TAILSCALE_AUTHKEY:-}"
+                install_monitoring
+                install_tailscale
+                sed -i "s|^MONITORING=.*|MONITORING=true|" "$TOOLKIT_CONF"
+                sed -i "s|^TAILSCALE=.*|TAILSCALE=true|"   "$TOOLKIT_CONF"
+                ;;
+            3) return ;;
+        esac
+    fi
+}
+
+# ── cron helpers ─────────────────────────────────────────────
+_cron_add() {
+    local line="$1"
+    local tag="$2"
+    local tmpfile
+    tmpfile=$(mktemp)
+    crontab -l 2>/dev/null | grep -v "$tag" > "$tmpfile" || true
+    echo "$line" >> "$tmpfile"
+    crontab "$tmpfile"
+    rm -f "$tmpfile"
+}
+
+_cron_remove() {
+    local tag="$1"
+    local tmpfile
+    tmpfile=$(mktemp)
+    crontab -l 2>/dev/null | grep -v "$tag" > "$tmpfile" || true
+    crontab "$tmpfile"
+    rm -f "$tmpfile"
 }
 
 # ============================================================
@@ -637,6 +1167,9 @@ collect_install_input() {
     else
         TELEGRAM_BOT_TOKEN=""; TELEGRAM_CHAT_ID=""
     fi
+    DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+    SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
+    PAGERDUTY_ROUTING_KEY="${PAGERDUTY_ROUTING_KEY:-}"
 
     # 11. Auto-upgrade (default: NO)
     echo ""
@@ -1175,6 +1708,9 @@ R2_SECRET_KEY=${R2_SECRET_KEY:-}
 RETENTION_DAYS=${RETENTION_DAYS}
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
 TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+PAGERDUTY_ROUTING_KEY=${PAGERDUTY_ROUTING_KEY:-}
 AUTO_UPGRADE=${AUTO_UPGRADE:-false}
 MONITORING=${MONITORING}
 CLOUDFLARE_TUNNEL=${CLOUDFLARE_TUNNEL}

@@ -80,38 +80,54 @@ The `canton-validator` dashboard is provisioned automatically on startup.
 
 ![Canton Validator Dashboard — Overview](img/dashboard-overview.png)
 
-![Canton Validator Dashboard — Triggers & JVM](img/dashboard-triggers-jvm.png)
+![Canton Validator Dashboard — Participant](img/dashboard-participant.png)
 
-![Canton Validator Dashboard — System](img/dashboard-system.png)
+![Canton Validator Dashboard — Triggers & Automations](img/dashboard-triggers.png)
 
-28 panels across 7 sections:
+![Canton Validator Dashboard — JVM, DB & System](img/dashboard-jvm-db-system.png)
+
+38 panels across 8 sections:
 
 ### Overview
 - **CC Balance** — `splice_wallet_unlocked_amulet_balance`
-- **Sync Lag** — time since last ingested record (green <30s / yellow <60s / red >60s)
+- **Sync Lag** — time since last seen record (green <30s / yellow <60s / red >60s)
 - **Rewards Today** — `ReceiveFaucetCouponTrigger` completions in the last 24h
 - **Retry Failures** — `splice_retries_failures` total (red if >0)
-- **Version** — from `target_info` metric
+- **Validator Health** — `up{job="canton-validator"}` (green = up)
+- **Participant Health** — `daml_health_status{job="canton-participant"}` (green = healthy)
+- **Sync Lag History** — full-width time series of sync lag over time
 
 ### Rewards & Economics
 - Reward rate per hour (time series)
 - CC balance history (time series)
 
 ### Network Health
-- Processing lag ms
 - TX throughput (transactions/s)
 - Active contracts by store
 - gRPC errors (red if >0)
 
-### Triggers
+### Participant
+Canton participant metrics collected directly from `participant:10013`.
+
+- Health Status Timeline — `daml_health_status` over time
+- Sequencer Client Delay — current submission delay
+- Submissions In Flight — pending submissions
+- Dropped Submissions — submissions dropped due to overload or timeout
+- Sequencer Events Rate — events/s processed by the participant
+- Event Batches In Flight — batches currently being processed
+
+### Triggers & Automations
 Canton has no "missed blocks" concept — triggers are the closest equivalent. A validator consistently processing `ReceiveFaucetCouponTrigger` is healthy.
 
-- All triggers rate (by trigger_name)
-- Failed / noop triggers
-- Trigger latency p95
+- Trigger Runs — rate of completed triggers by name
+- Trigger Attempts — all attempts including retries
+- Failed Triggers — Contention Errors
+- Failed Triggers — Non-Contention Errors
+- Trigger Latency p95
+- Retry Failures Rate
 
 ### JVM
-- Heap usage % (gauge, red >85%)
+- Heap % (gauge, red >85%)
 - JVM CPU %
 - GC time/s
 - Thread count
@@ -154,7 +170,7 @@ rate(daml_sequencer_client_traffic_control_submitted_event_cost_total{
 
 Additionally, the dashboards define `namespace` as a required template variable populated by `label_values(...)`. On a docker-compose setup where the label is absent, the variable dropdown is empty and all panels stay blank.
 
-This toolkit's dashboard is built from scratch using only labels that are actually present in docker-compose metrics — primarily `job` (set in `prometheus.yml`) and `instance`. All 28 panels are verified to show real data on a live validator.
+This toolkit's dashboard is built from scratch using only labels that are actually present in docker-compose metrics — primarily `job` (set in `prometheus.yml`) and `instance`. All panels are verified to show real data on a live validator.
 
 The official dashboards can still be imported manually as a reference — they are not removed or replaced, just not used here.
 
@@ -191,12 +207,14 @@ Recommended rules:
 | Alert | Condition | Severity |
 |-------|-----------|----------|
 | ValidatorDown | `up{job="canton-validator"} == 0` for 2m | critical |
-| SyncLagHigh | lag > 120s for 2m | critical |
-| SyncLagWarning | lag > 60s for 5m | warning |
+| ParticipantUnhealthy | `daml_health_status{job="canton-participant"} != 1` for 2m | critical |
+| SyncLagHigh | `time()*1000 - splice_store_last_seen_record_time_ms > 120000` for 2m | critical |
+| SyncLagWarning | `time()*1000 - splice_store_last_seen_record_time_ms > 60000` for 5m | warning |
 | RetryFailures | `splice_retries_failures > 10` | warning |
 | HeapHigh | heap % > 85 for 5m | warning |
 | DiskLow | disk free < 20GB | warning |
 | gRPCErrors | gRPC error rate > 0 for 5m | warning |
+| DroppedSubmissions | `rate(daml_sequencer_client_submissions_dropped_total[5m]) > 0` | warning |
 
 ### Telegram contact point
 
@@ -226,7 +244,7 @@ command:
 Canton has no block signing. A validator is considered fully operational when all three conditions hold:
 
 1. `splice-validator-validator-1` container status = `healthy`
-2. Sync lag < 60s: `time()*1000 - splice_store_last_ingested_record_time_ms < 60000`
+2. Sync lag < 60s: `time()*1000 - splice_store_last_seen_record_time_ms < 60000`
 3. Receiving rewards: `rate(splice_trigger_completed_total{trigger_name="ReceiveFaucetCouponTrigger"}[1h]) > 0`
 
 ---
@@ -239,4 +257,3 @@ docker compose down
 ```
 
 Data is preserved in Docker volumes (`prometheus_data`, `grafana_data`).
----

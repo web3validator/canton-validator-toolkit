@@ -61,6 +61,51 @@ export async function buildServer(): Promise<FastifyInstance> {
   // ── Routes ────────────────────────────────────────────────────────────────
 
   server.get(
+    "/",
+    {
+      schema: {
+        summary: "API welcome page",
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              version: { type: "string" },
+              network: { type: "string" },
+              endpoints: {
+                type: "object",
+                properties: {
+                  health: { type: "string" },
+                  docs: { type: "string" },
+                  stats: { type: "string" },
+                  validators: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (_req, reply) => {
+      return reply.send({
+        name: "Canton Network Indexer API",
+        version: "0.1.0",
+        network: config.network,
+        description:
+          "Unified REST API aggregating Lighthouse Explorer, Scan API, Validator and Participant data",
+        endpoints: {
+          health: "/health",
+          docs: "/docs",
+          stats: "/api/stats",
+          validators: "/api/validators",
+          transactions: "/api/transactions",
+          governance: "/api/governance",
+        },
+      });
+    },
+  );
+
+  server.get(
     "/health",
     {
       schema: {

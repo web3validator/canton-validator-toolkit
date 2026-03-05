@@ -15,7 +15,7 @@ export async function registerValidatorRoutes(server: FastifyInstance): Promise<
           type: "object",
           properties: {
             live: { type: "boolean", description: "Force live fetch" },
-            limit: { type: "integer", default: 100, maximum: 500 },
+            limit: { type: "integer", default: 1000, maximum: 1000 },
           },
         },
       },
@@ -23,7 +23,7 @@ export async function registerValidatorRoutes(server: FastifyInstance): Promise<
     async (req, reply) => {
       const q = req.query as Record<string, unknown>;
       const live = q["live"] === true || q["live"] === "true";
-      const limit = Math.min(Number(q["limit"] ?? 100), 500);
+      const limit = Math.min(Number(q["limit"] ?? 1000), 1000);
 
       if (!live) {
         const rows = await queryRows<Record<string, unknown>>(

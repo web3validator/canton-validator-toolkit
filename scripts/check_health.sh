@@ -30,6 +30,9 @@ source "$TOOLKIT_CONF"
 
 TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
 TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
+PAGERDUTY_ROUTING_KEY="${PAGERDUTY_ROUTING_KEY:-}"
 NODE_NAME="${NODE_NAME:-Canton-Validator}"
 AUTO_RESTART="${AUTO_RESTART:-true}"
 
@@ -41,9 +44,12 @@ DISK_WARN_GB=20       # GB free — warning threshold
 mkdir -p "$STATE_DIR"
 
 # ============================================================
-# Telegram
+# Alert channels
 # ============================================================
-send_telegram() {
+
+# ── Telegram ─────────────────────────────────────────────────
+# Returns message_id (used for pin/unpin)
+_send_telegram() {
     [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ] && return 0
     local response
     response=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
@@ -53,7 +59,7 @@ send_telegram() {
     echo "$response" | grep -oP '"message_id":\K[0-9]+' || true
 }
 
-pin_message() {
+_pin_telegram() {
     [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ] && return 0
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/pinChatMessage" \
         -d chat_id="${TELEGRAM_CHAT_ID}" \
@@ -61,11 +67,56 @@ pin_message() {
         -d disable_notification=false > /dev/null 2>&1 || true
 }
 
-unpin_message() {
+_unpin_telegram() {
     [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ] && return 0
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/unpinChatMessage" \
         -d chat_id="${TELEGRAM_CHAT_ID}" \
         -d message_id="$1" > /dev/null 2>&1 || true
+}
+
+# ── Discord ───────────────────────────────────────────────────
+# Strips HTML, sends plain text
+_send_discord() {
+    [ -z "$DISCORD_WEBHOOK_URL" ] && return 0
+    local text
+    text=$(echo "$1" | sed 's/<b>//g; s/<\/b>//g; s/<[^>]*>//g')
+    curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"content\": $(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" <<< "$text")}" \
+        > /dev/null 2>&1 || true
+}
+
+# ── Slack ─────────────────────────────────────────────────────
+# Strips HTML, sends plain text
+_send_slack() {
+    [ -z "$SLACK_WEBHOOK_URL" ] && return 0
+    local text
+    text=$(echo "$1" | sed 's/<b>//g; s/<\/b>//g; s/<[^>]*>//g')
+    curl -s -X POST "$SLACK_WEBHOOK_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"text\": $(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" <<< "$text")}" \
+        > /dev/null 2>&1 || true
+}
+
+# ── PagerDuty Events API v2 ───────────────────────────────────
+# action: trigger | resolve — uses dedup_key for auto-resolve
+_send_pagerduty() {
+    [ -z "$PAGERDUTY_ROUTING_KEY" ] && return 0
+    local action="$2"
+    local summary
+    summary=$(echo "$1" | sed 's/<[^>]*>//g' | head -c 1024)
+    curl -s -X POST "https://events.pagerduty.com/v2/enqueue" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"routing_key\": \"${PAGERDUTY_ROUTING_KEY}\",
+            \"event_action\": \"${action}\",
+            \"dedup_key\": \"canton-validator-$(hostname)\",
+            \"payload\": {
+                \"summary\": $(python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" <<< "$summary"),
+                \"source\": \"$(hostname)\",
+                \"severity\": \"critical\"
+            }
+        }" > /dev/null 2>&1 || true
 }
 
 # ============================================================
@@ -129,17 +180,17 @@ check_sync_lag() {
         return
     fi
 
-    # Ingestion lag
-    local last_ingested
-    last_ingested=$(echo "$metrics" \
-        | grep 'splice_store_last_ingested_record_time_ms' \
+    # Sync lag (last_seen = most recent record time seen from sequencer)
+    local last_seen
+    last_seen=$(echo "$metrics" \
+        | grep 'splice_store_last_seen_record_time_ms' \
         | grep -v '#' \
         | awk '{print $2}' | sort -n | tail -1)
 
-    if [ -n "$last_ingested" ] && [ "$last_ingested" != "0" ]; then
+    if [ -n "$last_seen" ] && [ "$last_seen" != "0" ]; then
         local now_ms lag_s
         now_ms=$(python3 -c "import time; print(int(time.time() * 1000))")
-        lag_s=$(python3 -c "print(int(max(0, (int($now_ms) - int(float($last_ingested))) // 1000)))")
+        lag_s=$(python3 -c "print(int(max(0, (int($now_ms) - int(float($last_seen))) // 1000)))")
 
         if [ "$lag_s" -gt "$SYNC_LAG_CRIT" ]; then
             issues="${issues}🔴 Sync lag: ${lag_s}s (critical, >${SYNC_LAG_CRIT}s)\n"
@@ -179,6 +230,11 @@ check_disk() {
 
 # ============================================================
 # State machine — alert once, recover once, no spam
+#
+# Telegram : alert + pin  →  silent while failing  →  unpin + resolved
+# Discord  : alert        →  silent while failing  →  resolved message
+# Slack    : alert        →  silent while failing  →  resolved message
+# PagerDuty: trigger      →  silent (PD escalates) →  resolve (closes incident)
 # ============================================================
 run_state_machine() {
     local alert_text="$1"
@@ -192,7 +248,7 @@ run_state_machine() {
     [ -f "$MSGID_FILE" ] && prev_msgid=$(cat "$MSGID_FILE")
 
     if [ "$is_critical" -eq 1 ] && [ "$prev_state" != "1" ]; then
-        # New failure — send + pin
+        # ── New failure ───────────────────────────────────────
         local message
         message="🚨 <b>${NODE_NAME}</b>
 Host: $(hostname)
@@ -200,28 +256,48 @@ Host: $(hostname)
 ${alert_text}
 Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
-        local msg_id
-        msg_id=$(send_telegram "$message")
-        if [ -n "$msg_id" ]; then
-            pin_message "$msg_id"
-            echo "$msg_id" > "$MSGID_FILE"
+        # Telegram: send + pin
+        local tg_msg_id
+        tg_msg_id=$(_send_telegram "$message")
+        if [ -n "$tg_msg_id" ]; then
+            _pin_telegram "$tg_msg_id"
+            echo "$tg_msg_id" > "$MSGID_FILE"
         fi
+
+        # Discord + Slack: send once
+        _send_discord "$message"
+        _send_slack "$message"
+
+        # PagerDuty: trigger incident (dedup_key ensures single incident)
+        _send_pagerduty "$message" "trigger"
+
         echo "1" > "$STATE_FILE"
-        log "ALERT sent (msg_id: ${msg_id:-n/a})"
+        log "ALERT sent (tg_msg_id: ${tg_msg_id:-n/a})"
 
     elif [ "$is_critical" -eq 0 ] && [ "$prev_state" = "1" ]; then
-        # Recovery — unpin + send resolved
-        [ -n "$prev_msgid" ] && unpin_message "$prev_msgid"
-        send_telegram "✅ <b>${NODE_NAME}</b> — RESOLVED
+        # ── Recovery ──────────────────────────────────────────
+        local resolved_msg
+        resolved_msg="✅ <b>${NODE_NAME}</b> — RESOLVED
 Host: $(hostname)
-Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" > /dev/null
+Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+        # Telegram: unpin alert + send resolved
+        [ -n "$prev_msgid" ] && _unpin_telegram "$prev_msgid"
+        _send_telegram "$resolved_msg" > /dev/null
+
+        # Discord + Slack: send resolved message
+        _send_discord "$resolved_msg"
+        _send_slack "$resolved_msg"
+
+        # PagerDuty: resolve incident by dedup_key
+        _send_pagerduty "$resolved_msg" "resolve"
 
         echo "0" > "$STATE_FILE"
         rm -f "$MSGID_FILE"
-        log "RECOVERY sent, alert unpinned"
+        log "RECOVERY sent (Telegram unpinned, PagerDuty resolved)"
 
     elif [ "$is_critical" -eq 1 ]; then
-        # Still failing — no repeat telegram, just log
+        # ── Still failing — silent, no repeat ─────────────────
         log "Still failing (no repeat alert):"
         echo -e "$alert_text" | sed 's/^/  /'
 
