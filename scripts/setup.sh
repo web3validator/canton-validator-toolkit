@@ -355,16 +355,18 @@ main_menu() {
     echo "  1) Install Canton validator (fresh setup)"
     echo "  2) Update to latest version"
     echo "  3) Show status"
-    echo "  4) Exit"
+    echo "  4) Advanced options"
+    echo "  5) Exit"
     echo ""
     local choice
-    read -rp "$(echo -e "${BOLD}Choice [1-4]${NC}: ")" choice
+    read -rp "$(echo -e "${BOLD}Choice [1-5]${NC}: ")" choice
 
     case "$choice" in
         1) mode_install ;;
         2) mode_update ;;
         3) mode_status ;;
-        4) exit 0 ;;
+        4) mode_advanced ;;
+        5) exit 0 ;;
         *) die "Invalid choice" ;;
     esac
 }
@@ -397,17 +399,31 @@ mode_status() {
     echo ""
 
     echo -e "  ${BOLD}Containers:${NC}"
+    local has_unhealthy=false
     for c in splice-validator-validator-1 splice-validator-participant-1 splice-validator-nginx-1; do
         local running health
         running=$(docker inspect --format='{{.State.Running}}' "$c" 2>/dev/null || echo "false")
         health=$(docker inspect --format='{{.State.Health.Status}}' "$c" 2>/dev/null || echo "n/a")
         if [ "$running" = "true" ]; then
-            echo -e "    ${GREEN}●${NC} $c [$health]"
+            if [ "$health" = "healthy" ]; then
+                echo -e "    ${GREEN}●${NC} $c [$health]  ${GREEN}✓${NC}"
+            elif [ "$health" = "unhealthy" ]; then
+                echo -e "    ${YELLOW}●${NC} $c [$health]  ${YELLOW}⚠${NC}"
+                has_unhealthy=true
+            else
+                echo -e "    ${GREEN}●${NC} $c [$health]"
+            fi
         else
             echo -e "    ${RED}●${NC} $c [down]"
         fi
     done
     echo ""
+
+    if [ "$has_unhealthy" = "true" ]; then
+        echo -e "  ${YELLOW}⚠ WARNING: One or more containers are unhealthy!${NC}"
+        echo -e "  Check logs: ${BOLD}docker logs splice-validator-validator-1${NC}"
+        echo ""
+    fi
 
     if [ "$our_version" != "not running" ] && [ "$net_version" != "unavailable" ]; then
         if version_gte "$net_version" "$our_version" && [ "$our_version" != "$net_version" ]; then
@@ -418,6 +434,30 @@ mode_status() {
         fi
     fi
     echo ""
+}
+
+# ============================================================
+# Mode: ADVANCED
+# ============================================================
+mode_advanced() {
+    echo ""
+    echo -e "${BOLD}═══════════════════ Advanced Options ═══════════════════${NC}"
+    echo ""
+    echo -e "  ${YELLOW}⚠ Coming in Phase 2:${NC}"
+    echo ""
+    echo -e "  • Indexer setup & deployment"
+    echo -e "  • Custom API integrations"
+    echo -e "  • Cantara onboarding integration"
+    echo -e "  • DAO governance tools"
+    echo -e "  • Advanced monitoring configuration"
+    echo ""
+    echo -e "  ${BOLD}Currently available via manual configuration:${NC}"
+    echo -e "  • Auto-upgrade: edit ~/.canton/toolkit.conf (AUTO_UPGRADE=true/false)"
+    echo -e "  • Monitoring: cd ~/canton-validator-toolkit/monitoring && docker compose up -d"
+    echo -e "  • Backups: configure BACKUP_TYPE in ~/.canton/toolkit.conf"
+    echo ""
+    read -rp "$(echo -e "${BOLD}Press Enter to return to main menu${NC}")"
+    main
 }
 
 # ============================================================
@@ -612,6 +652,25 @@ collect_install_input() {
     read -rp "$(echo -e "${BOLD}Install Grafana monitoring stack? [y/N]${NC}: ")" mon_choice
     [[ "$mon_choice" =~ ^[Yy]$ ]] && MONITORING="true" || MONITORING="false"
 
+    # 13. Monitoring remote access
+    TAILSCALE="false"
+    TAILSCALE_AUTHKEY=""
+    if [ "$MONITORING" = "true" ]; then
+        echo ""
+        echo -e "${BOLD}Grafana remote access:${NC}"
+        echo "  1) SSH tunnel only (default)"
+        echo "  2) Tailscale (no domain needed, recommended)"
+        echo "  3) Skip"
+        local access_choice
+        read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" access_choice
+        if [ "$access_choice" = "2" ]; then
+            TAILSCALE="true"
+            echo ""
+            echo -e "  Get auth key: ${BLUE}https://login.tailscale.com/admin/settings/keys${NC}"
+            prompt TAILSCALE_AUTHKEY "Auth key (tskey-auth-..., or empty for browser auth)" ""
+        fi
+    fi
+
     # 13. Cloudflare tunnel
     echo ""
     local cf_choice
@@ -639,6 +698,7 @@ collect_install_input() {
     echo "  Auto-upgrade: $AUTO_UPGRADE"
     echo "  Monitoring:   $MONITORING"
     echo "  CF Tunnel:    $CLOUDFLARE_TUNNEL"
+    echo "  Tailscale:    $TAILSCALE"
     echo ""
     local confirm
     read -rp "$(echo -e "${BOLD}Proceed with installation? [y/N]${NC}: ")" confirm
@@ -663,6 +723,7 @@ mode_install() {
     wait_healthy || true
     setup_cron
     install_monitoring
+    install_tailscale
     install_cloudflare
     send_telegram "✅ <b>${NODE_NAME}</b>%0A%0ACanton ${VERSION} installed on $(hostname)%0ANetwork: ${NETWORK}%0AParty: ${PARTY_HINT}"
     print_access_info "$VERSION"
@@ -1070,7 +1131,7 @@ write_htpasswd() {
 }
 
 # ============================================================
-# Patch compose.yaml (port 80 → 8888 on 127.0.0.1)
+# Patch compose.yaml (port 80 → 8888, localhost-only bind)
 # ============================================================
 patch_compose() {
     local validator_dir="$1"
@@ -1118,6 +1179,8 @@ AUTO_UPGRADE=${AUTO_UPGRADE:-false}
 MONITORING=${MONITORING}
 CLOUDFLARE_TUNNEL=${CLOUDFLARE_TUNNEL}
 CLOUDFLARE_DOMAIN=${CLOUDFLARE_DOMAIN:-}
+TAILSCALE=${TAILSCALE:-false}
+TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY:-}
 CANTON_NETWORK_NAME=${CANTON_NETWORK_NAME:-splice-validator}
 AUTO_RESTART=true
 WAIT_HOURS=12
@@ -1246,8 +1309,58 @@ install_monitoring() {
 
     cd "$TOOLKIT_DIR/monitoring"
     CANTON_NETWORK_NAME="$net_name" docker compose up -d
-    success "Monitoring started — Grafana: http://127.0.0.1:3001 (admin/admin)"
+    success "Monitoring started — Grafana: http://localhost:3001 (admin/admin)"
 }
+# ============================================================
+# Install Tailscale
+# ============================================================
+install_tailscale() {
+    [ "${TAILSCALE:-false}" != "true" ] && return 0
+
+    log "Installing Tailscale..."
+    if ! command -v tailscale &>/dev/null; then
+        curl -fsSL https://tailscale.com/install.sh | sh >/dev/null 2>&1 || {
+            warn "Tailscale install failed — install manually: curl -fsSL https://tailscale.com/install.sh | sh"
+            return 0
+        }
+    fi
+    success "Tailscale installed"
+
+    local ts_ip=""
+    if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+        log "Connecting to Tailscale with auth key..."
+        sudo tailscale up --authkey="$TAILSCALE_AUTHKEY" --accept-routes >/dev/null 2>&1 && {
+            sleep 3
+            ts_ip=$(tailscale ip -4 2>/dev/null || echo "")
+            [ -n "$ts_ip" ] && success "Tailscale connected: $ts_ip"
+        } || warn "tailscale up failed — run manually: sudo tailscale up"
+    else
+        log "Starting Tailscale — browser authorization required..."
+        local auth_url
+        auth_url=$(sudo tailscale up --accept-routes 2>&1 | grep -oP 'https://login\.tailscale\.com/\S+' | head -1 || echo "")
+        echo ""
+        if [ -n "$auth_url" ]; then
+            echo -e "  ${BOLD}Authorize Tailscale in your browser:${NC}"
+            echo -e "  ${BLUE}${auth_url}${NC}"
+        else
+            echo -e "  ${BOLD}Run:${NC} sudo tailscale up"
+            echo -e "  Then open the URL shown in your browser."
+        fi
+        echo ""
+        echo -e "  After authorization: ${BOLD}http://<tailscale-ip>:3001${NC}"
+        echo -e "  Get your Tailscale IP: tailscale ip -4"
+        warn "Complete browser auth to access Grafana via Tailscale"
+        return 0
+    fi
+
+    if [ -n "$ts_ip" ]; then
+        echo ""
+        echo -e "  ${GREEN}${BOLD}Grafana via Tailscale:${NC}  http://${ts_ip}:3001"
+        echo -e "  Install Tailscale on your device: ${BLUE}https://tailscale.com/download${NC}"
+        grep -q "^TAILSCALE_IP=" "$TOOLKIT_CONF" 2>/dev/null             && sed -i "s|^TAILSCALE_IP=.*|TAILSCALE_IP=${ts_ip}|" "$TOOLKIT_CONF"             || echo "TAILSCALE_IP=${ts_ip}" >> "$TOOLKIT_CONF"
+    fi
+}
+
 
 # ============================================================
 # Install Cloudflare tunnel
@@ -1296,7 +1409,7 @@ print_access_info() {
     echo ""
     echo -e "${BOLD}Wallet access:${NC}"
     echo "  1. Open SSH tunnel:"
-    echo "     ssh -L 8888:127.0.0.1:8888 $(whoami)@$(hostname -I | awk '{print $1}') -N"
+    echo "     ssh -L 8888:localhost:8888 $(whoami)@$(hostname -I | awk '{print $1}') -N"
     echo "  2. Open in browser: http://wallet.localhost:8888"
     echo "  3. Login: validator / <your password>"
     echo ""
