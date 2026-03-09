@@ -1983,6 +1983,7 @@ SPLICE_APP_UI_AMULET_NAME=Canton Coin
 SPLICE_APP_UI_AMULET_NAME_ACRONYM=CC
 SPLICE_APP_UI_NAME_SERVICE_NAME=Canton Name Service
 SPLICE_APP_UI_NAME_SERVICE_NAME_ACRONYM=CNS
+VALIDATOR_AUTH_AUDIENCE=https://validator.example.com
 ENVEOF
     success ".env written"
 }
@@ -2011,6 +2012,12 @@ patch_env() {
     # COMPOSE_FILE
     grep -q "^COMPOSE_FILE=" "$env_file" || \
         echo "COMPOSE_FILE=compose.yaml:compose-disable-auth.yaml" >> "$env_file"
+
+    # VALIDATOR_AUTH_AUDIENCE — required for unsafe auth wallet UI
+    if ! grep -q "^VALIDATOR_AUTH_AUDIENCE=" "$env_file"; then
+        echo 'VALIDATOR_AUTH_AUDIENCE=https://validator.example.com' >> "$env_file"
+        success "VALIDATOR_AUTH_AUDIENCE added"
+    fi
 
     # SPLICE_APP_UI_* — all 6 vars required (ZodError prevention)
     if ! grep -q "^SPLICE_APP_UI_NETWORK_NAME=" "$env_file"; then
