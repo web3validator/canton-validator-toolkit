@@ -1326,19 +1326,66 @@ collect_install_input() {
     echo -e "${BOLD}─── Fresh Installation ─────────────────────────${NC}"
     echo ""
 
+    # Load saved config as defaults if exists
+    local saved_network="" saved_party="" saved_migration="" saved_sv="" saved_scan=""
+    local saved_backup="" saved_remote_host="" saved_remote_path=""
+    local saved_r2_bucket="" saved_r2_account="" saved_r2_key="" saved_r2_secret=""
+    local saved_retention="" saved_tg_token="" saved_tg_chat="" saved_auto_upgrade=""
+    local saved_monitoring="" saved_tailscale="" saved_tailscale_key=""
+    local saved_cf_tunnel="" saved_cf_domain="" saved_node_name="" saved_wallet_pass=""
+    if [ -f "$TOOLKIT_CONF" ]; then
+        source "$TOOLKIT_CONF"
+        saved_network="${NETWORK:-}"
+        saved_party="${PARTY_HINT:-}"
+        saved_migration="${MIGRATION_ID:-}"
+        saved_sv="${SV_URL:-}"
+        saved_scan="${SCAN_URL:-}"
+        saved_backup="${BACKUP_TYPE:-}"
+        saved_remote_host="${REMOTE_HOST:-}"
+        saved_remote_path="${REMOTE_PATH:-}"
+        saved_r2_bucket="${R2_BUCKET:-}"
+        saved_r2_account="${R2_ACCOUNT_ID:-}"
+        saved_r2_key="${R2_ACCESS_KEY:-}"
+        saved_r2_secret="${R2_SECRET_KEY:-}"
+        saved_retention="${RETENTION_DAYS:-1}"
+        saved_tg_token="${TELEGRAM_BOT_TOKEN:-}"
+        saved_tg_chat="${TELEGRAM_CHAT_ID:-}"
+        saved_auto_upgrade="${AUTO_UPGRADE:-false}"
+        saved_monitoring="${MONITORING:-false}"
+        saved_tailscale="${TAILSCALE:-false}"
+        saved_tailscale_key="${TAILSCALE_AUTHKEY:-}"
+        saved_cf_tunnel="${CLOUDFLARE_TUNNEL:-false}"
+        saved_cf_domain="${CLOUDFLARE_DOMAIN:-}"
+        saved_node_name="${NODE_NAME:-}"
+        saved_wallet_pass="${WALLET_PASSWORD:-}"
+        if [ -n "$saved_network" ]; then
+            echo -e "  ${YELLOW}Saved config found — press Enter to keep existing values${NC}"
+            echo ""
+        fi
+    fi
+
     # 1. Network
     echo -e "${BOLD}Select network:${NC}"
     echo "  1) mainnet"
     echo "  2) testnet"
     echo "  3) devnet"
-    local net_choice
-    read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" net_choice
-    case "$net_choice" in
-        1) NETWORK="mainnet" ;;
-        2) NETWORK="testnet" ;;
-        3) NETWORK="devnet" ;;
-        *) die "Invalid choice" ;;
+    local net_choice net_default=""
+    case "$saved_network" in
+        mainnet) net_default=" [current: mainnet]" ;;
+        testnet) net_default=" [current: testnet]" ;;
+        devnet)  net_default=" [current: devnet]"  ;;
     esac
+    read -rp "$(echo -e "${BOLD}Choice [1-3]${net_default}${NC}: ")" net_choice
+    if [ -z "$net_choice" ] && [ -n "$saved_network" ]; then
+        NETWORK="$saved_network"
+    else
+        case "$net_choice" in
+            1) NETWORK="mainnet" ;;
+            2) NETWORK="testnet" ;;
+            3) NETWORK="devnet" ;;
+            *) die "Invalid choice" ;;
+        esac
+    fi
 
     case "$NETWORK" in
         mainnet)
@@ -1358,11 +1405,15 @@ collect_install_input() {
             ;;
     esac
 
+    [ -n "$saved_sv" ]        && DEFAULT_SV="$saved_sv"
+    [ -n "$saved_scan" ]      && DEFAULT_SCAN="$saved_scan"
+    [ -n "$saved_migration" ] && DEFAULT_MIGRATION="$saved_migration"
+
     # Check SV whitelist before anything else
     check_sv_whitelist "$NETWORK"
 
-    # If an accessible SV was found — use it as default SV/Scan URL
-    if [ -n "$SV_ACCESSIBLE_URL" ]; then
+    # If an accessible SV was found and no saved value — use it as default SV/Scan URL
+    if [ -n "$SV_ACCESSIBLE_URL" ] && [ -z "$saved_sv" ]; then
         local sv_base
         sv_base=$(echo "$SV_ACCESSIBLE_URL" | sed 's|scan\.|sv.|')
         DEFAULT_SV="$sv_base"
@@ -1381,7 +1432,7 @@ collect_install_input() {
 
     # 2. Party hint
     echo ""
-    prompt PARTY_HINT "Party hint (e.g. MyOrg-validator-1)" ""
+    prompt PARTY_HINT "Party hint (e.g. MyOrg-validator-1)" "${saved_party:-}"
     [ -z "$PARTY_HINT" ] && die "Party hint cannot be empty"
 
     # 3. Migration ID
@@ -1441,12 +1492,20 @@ collect_install_input() {
     fi
 
     # 7. Node name
-    local default_node_name="${PARTY_HINT}-$(echo "$NETWORK" | tr '[:lower:]' '[:upper:]')"
+    local default_node_name="${saved_node_name:-${PARTY_HINT}-$(echo "$NETWORK" | tr '[:lower:]' '[:upper:]')}"
     prompt NODE_NAME "Node name (for alerts)" "$default_node_name"
 
     # 8. Wallet password
     echo ""
-    prompt_secret WALLET_PASSWORD "Wallet nginx basic auth password (username: validator)"
+    if [ -n "$saved_wallet_pass" ]; then
+        echo -e "  ${YELLOW}Wallet password already set — press Enter to keep, or type new one${NC}"
+        local new_pass
+        read -rsp "$(echo -e "${BOLD}Wallet nginx basic auth password (username: validator)${NC}: ")" new_pass
+        echo
+        WALLET_PASSWORD="${new_pass:-$saved_wallet_pass}"
+    else
+        prompt_secret WALLET_PASSWORD "Wallet nginx basic auth password (username: validator)"
+    fi
     [ -z "$WALLET_PASSWORD" ] && die "Password cannot be empty"
 
     # 9. Backup
@@ -1455,21 +1514,32 @@ collect_install_input() {
     echo "  1) rsync (SSH to remote server)"
     echo "  2) r2 (Cloudflare R2)"
     echo "  3) skip"
+    local backup_hint=""
+    [ -n "$saved_backup" ] && backup_hint=" [current: $saved_backup]"
     local backup_choice
-    read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" backup_choice
+    read -rp "$(echo -e "${BOLD}Choice [1-3]${backup_hint}${NC}: ")" backup_choice
+    if [ -z "$backup_choice" ] && [ -n "$saved_backup" ]; then
+        backup_choice="$saved_backup"
+        case "$backup_choice" in
+            rsync) backup_choice="1" ;;
+            r2)    backup_choice="2" ;;
+            *)     backup_choice="3" ;;
+        esac
+    fi
     case "$backup_choice" in
         1)
             BACKUP_TYPE="rsync"
-            prompt REMOTE_HOST "Remote host (user@host)" ""
-            prompt REMOTE_PATH "Remote path" "~/canton-backups/$NETWORK"
+            prompt REMOTE_HOST "Remote host (user@host)" "${saved_remote_host:-}"
+            prompt REMOTE_PATH "Remote path" "${saved_remote_path:-~/canton-backups/$NETWORK}"
             R2_BUCKET=""; R2_ACCOUNT_ID=""; R2_ACCESS_KEY=""; R2_SECRET_KEY=""
             ;;
         2)
             BACKUP_TYPE="r2"
-            prompt R2_BUCKET    "R2 bucket name" ""
-            prompt R2_ACCOUNT_ID "R2 account ID" ""
-            prompt R2_ACCESS_KEY "R2 access key" ""
+            prompt R2_BUCKET    "R2 bucket name" "${saved_r2_bucket:-}"
+            prompt R2_ACCOUNT_ID "R2 account ID" "${saved_r2_account:-}"
+            prompt R2_ACCESS_KEY "R2 access key" "${saved_r2_key:-}"
             prompt_secret R2_SECRET_KEY "R2 secret key"
+            [ -z "$R2_SECRET_KEY" ] && R2_SECRET_KEY="${saved_r2_secret:-}"
             REMOTE_HOST=""; REMOTE_PATH=""
             ;;
         *)
@@ -1479,8 +1549,7 @@ collect_install_input() {
             ;;
     esac
     local retention_input
-    prompt retention_input "Backup retention (days)" "1"
-    # ensure it's a number, default to 1 if user entered non-numeric
+    prompt retention_input "Backup retention (days)" "${saved_retention:-1}"
     if [[ "$retention_input" =~ ^[0-9]+$ ]]; then
         RETENTION_DAYS="$retention_input"
     else
@@ -1489,11 +1558,13 @@ collect_install_input() {
 
     # 10. Telegram
     echo ""
+    local tg_default="N"
+    [ -n "$saved_tg_token" ] && tg_default="Y (current: configured)"
     local tg_choice
-    read -rp "$(echo -e "${BOLD}Enable Telegram alerts? [y/N]${NC}: ")" tg_choice
-    if [[ "$tg_choice" =~ ^[Yy]$ ]]; then
-        prompt TELEGRAM_BOT_TOKEN "Telegram bot token" ""
-        prompt TELEGRAM_CHAT_ID  "Telegram chat ID"   ""
+    read -rp "$(echo -e "${BOLD}Enable Telegram alerts? [y/N] ${tg_default}${NC}: ")" tg_choice
+    if [[ "$tg_choice" =~ ^[Yy]$ ]] || { [ -z "$tg_choice" ] && [ -n "$saved_tg_token" ]; }; then
+        prompt TELEGRAM_BOT_TOKEN "Telegram bot token" "${saved_tg_token:-}"
+        prompt TELEGRAM_CHAT_ID  "Telegram chat ID"   "${saved_tg_chat:-}"
     else
         TELEGRAM_BOT_TOKEN=""; TELEGRAM_CHAT_ID=""
     fi
@@ -1505,42 +1576,64 @@ collect_install_input() {
     echo ""
     echo -e "${BOLD}Auto-upgrade cron (runs daily at 22:00)?${NC}"
     echo -e "  Default: ${YELLOW}NO${NC} — upgrades run manually via this script"
+    local au_hint=""
+    [ "$saved_auto_upgrade" = "true" ] && au_hint=" [current: enabled]"
     local au_choice
-    read -rp "$(echo -e "${BOLD}Enable auto-upgrade? [y/N]${NC}: ")" au_choice
-    [[ "$au_choice" =~ ^[Yy]$ ]] && AUTO_UPGRADE="true" || AUTO_UPGRADE="false"
+    read -rp "$(echo -e "${BOLD}Enable auto-upgrade? [y/N]${au_hint}${NC}: ")" au_choice
+    if [ -z "$au_choice" ] && [ "$saved_auto_upgrade" = "true" ]; then
+        AUTO_UPGRADE="true"
+    else
+        [[ "$au_choice" =~ ^[Yy]$ ]] && AUTO_UPGRADE="true" || AUTO_UPGRADE="false"
+    fi
 
     # 12. Monitoring stack
     echo ""
+    local mon_hint=""
+    [ "$saved_monitoring" = "true" ] && mon_hint=" [current: enabled]"
     local mon_choice
-    read -rp "$(echo -e "${BOLD}Install Grafana monitoring stack? [y/N]${NC}: ")" mon_choice
-    [[ "$mon_choice" =~ ^[Yy]$ ]] && MONITORING="true" || MONITORING="false"
+    read -rp "$(echo -e "${BOLD}Install Grafana monitoring stack? [y/N]${mon_hint}${NC}: ")" mon_choice
+    if [ -z "$mon_choice" ] && [ "$saved_monitoring" = "true" ]; then
+        MONITORING="true"
+    else
+        [[ "$mon_choice" =~ ^[Yy]$ ]] && MONITORING="true" || MONITORING="false"
+    fi
 
     # 13. Monitoring remote access
-    TAILSCALE="false"
-    TAILSCALE_AUTHKEY=""
+    TAILSCALE="${saved_tailscale:-false}"
+    TAILSCALE_AUTHKEY="${saved_tailscale_key:-}"
     if [ "$MONITORING" = "true" ]; then
         echo ""
         echo -e "${BOLD}Grafana remote access:${NC}"
         echo "  1) SSH tunnel only (default)"
         echo "  2) Tailscale (no domain needed, recommended)"
         echo "  3) Skip"
+        local access_hint=""
+        [ "$saved_tailscale" = "true" ] && access_hint=" [current: tailscale]"
         local access_choice
-        read -rp "$(echo -e "${BOLD}Choice [1-3]${NC}: ")" access_choice
-        if [ "$access_choice" = "2" ]; then
+        read -rp "$(echo -e "${BOLD}Choice [1-3]${access_hint}${NC}: ")" access_choice
+        if [ -z "$access_choice" ] && [ "$saved_tailscale" = "true" ]; then
+            TAILSCALE="true"
+            TAILSCALE_AUTHKEY="${saved_tailscale_key:-}"
+        elif [ "$access_choice" = "2" ]; then
             TAILSCALE="true"
             echo ""
             echo -e "  Get auth key: ${BLUE}https://login.tailscale.com/admin/settings/keys${NC}"
-            prompt TAILSCALE_AUTHKEY "Auth key (tskey-auth-..., or empty for browser auth)" ""
+            prompt TAILSCALE_AUTHKEY "Auth key (tskey-auth-..., or empty for browser auth)" "${saved_tailscale_key:-}"
+        else
+            TAILSCALE="false"
+            TAILSCALE_AUTHKEY=""
         fi
     fi
 
-    # 13. Cloudflare tunnel
+    # 14. Cloudflare tunnel
     echo ""
+    local cf_hint=""
+    [ "$saved_cf_tunnel" = "true" ] && cf_hint=" [current: enabled, domain: ${saved_cf_domain:-?}]"
     local cf_choice
-    read -rp "$(echo -e "${BOLD}Configure Cloudflare Tunnel for wallet access? [y/N]${NC}: ")" cf_choice
-    if [[ "$cf_choice" =~ ^[Yy]$ ]]; then
+    read -rp "$(echo -e "${BOLD}Configure Cloudflare Tunnel for wallet access? [y/N]${cf_hint}${NC}: ")" cf_choice
+    if [[ "$cf_choice" =~ ^[Yy]$ ]] || { [ -z "$cf_choice" ] && [ "$saved_cf_tunnel" = "true" ]; }; then
         CLOUDFLARE_TUNNEL="true"
-        prompt CLOUDFLARE_DOMAIN "Wallet domain (e.g. wallet.yourdomain.com)" ""
+        prompt CLOUDFLARE_DOMAIN "Wallet domain (e.g. wallet.yourdomain.com)" "${saved_cf_domain:-}"
     else
         CLOUDFLARE_TUNNEL="false"; CLOUDFLARE_DOMAIN=""
     fi
@@ -2124,7 +2217,21 @@ start_validator() {
     local onboarding_secret="${ONBOARDING_SECRET:-}"
     local start_args="-s $SV_URL -c $SCAN_URL -p $PARTY_HINT -m $MIGRATION_ID -o \"$onboarding_secret\" -w"
 
-    eval ./start.sh $start_args || die "Failed to start validator. Check: docker compose logs"
+    if ! eval ./start.sh $start_args; then
+        if docker info &>/dev/null; then
+            die "Failed to start validator. Check: docker compose logs"
+        else
+            echo ""
+            error "Docker permission denied — your user is not yet in the docker group."
+            echo ""
+            echo -e "  ${BOLD}Fix:${NC} run the following, then re-run setup and choose option 1:"
+            echo -e "  ${YELLOW}newgrp docker${NC}"
+            echo -e "  ${YELLOW}bash ~/canton-validator-toolkit/scripts/setup.sh${NC}"
+            echo ""
+            echo -e "  Your config has been saved — all answers will be pre-filled on re-run."
+            exit 1
+        fi
+    fi
     success "Validator started"
 }
 
