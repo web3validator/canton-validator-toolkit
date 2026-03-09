@@ -29,26 +29,57 @@ die()     { error "$1"; exit 1; }
 # Dependency check
 # ============================================================
 check_deps() {
-    # OS check
     if [ "$(uname -s)" != "Linux" ]; then
         die "Only Linux is supported"
     fi
 
-    local missing=()
-    for cmd in docker curl jq python3 openssl rsync git; do
-        command -v "$cmd" &>/dev/null || missing+=("$cmd")
-    done
-    docker compose version &>/dev/null || missing+=("docker-compose-plugin")
-
-    if [ ${#missing[@]} -gt 0 ]; then
-        echo ""
-        error "Missing dependencies: ${missing[*]}"
-        echo ""
-        echo "  Install with:"
-        echo "    sudo apt-get update && sudo apt-get install -y ${missing[*]}"
-        echo ""
-        exit 1
+    if ! command -v apt-get &>/dev/null; then
+        die "Only Debian/Ubuntu (apt-get) systems are supported for auto-install"
     fi
+
+    local apt_missing=()
+    local need_docker=false
+
+    for cmd in curl jq python3 openssl rsync git; do
+        command -v "$cmd" &>/dev/null || apt_missing+=("$cmd")
+    done
+
+    if ! command -v docker &>/dev/null; then
+        need_docker=true
+    elif ! docker compose version &>/dev/null; then
+        need_docker=true
+    fi
+
+    if [ ${#apt_missing[@]} -gt 0 ]; then
+        log "Installing missing packages: ${apt_missing[*]}"
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq "${apt_missing[@]}"
+    fi
+
+    if [ "$need_docker" = true ]; then
+        log "Installing Docker via official repo..."
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq ca-certificates curl gnupg lsb-release
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        sudo chmod a+r /etc/apt/keyrings/docker.gpg
+        echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+            | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq \
+            docker-ce docker-ce-cli containerd.io \
+            docker-buildx-plugin docker-compose-plugin
+        sudo usermod -aG docker "$USER" || true
+        success "Docker installed"
+    fi
+
+    for cmd in docker curl jq python3 openssl rsync git; do
+        command -v "$cmd" &>/dev/null || die "Dependency still missing after install: $cmd"
+    done
+    docker compose version &>/dev/null || die "docker compose plugin still not working after install"
+
     success "All dependencies satisfied"
 }
 
