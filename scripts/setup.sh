@@ -355,7 +355,7 @@ check_sv_whitelist() {
 
 get_validator_container() {
     docker ps -a --format '{{.Names}}' 2>/dev/null \
-        | grep -E 'validator-1$' | grep -v postgres | head -1
+        | grep -E 'validator-1$' | grep -v postgres | head -1 || true
 }
 
 get_our_version() {
@@ -363,7 +363,7 @@ get_our_version() {
     c=$(get_validator_container)
     [ -z "$c" ] && return 1
     docker inspect "$c" --format '{{.Config.Image}}' 2>/dev/null \
-        | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1
+        | grep -oP ':\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
 }
 
 # ============================================================
@@ -373,7 +373,7 @@ detect_existing_validator() {
     # Running container
     local container
     container=$(docker ps --format '{{.Names}}' 2>/dev/null \
-        | grep -E 'validator-1$' | grep -v postgres | head -1)
+        | grep -E 'validator-1$' | grep -v postgres | head -1 || true)
     [ -n "$container" ] && return 0
 
     # Bundle directory exists
@@ -1254,9 +1254,9 @@ mode_status() {
     echo -e "  ${BOLD}Containers:${NC}"
     local has_unhealthy=false
     local _vc _pc _nc
-    _vc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'validator-1$'   | grep -v postgres | head -1)
-    _pc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'participant-1$'  | head -1)
-    _nc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'nginx-1$'        | head -1)
+    _vc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'validator-1$'   | grep -v postgres | head -1 || true)
+    _pc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'participant-1$'  | head -1 || true)
+    _nc=$(docker ps -a --format '{{.Names}}' 2>/dev/null | grep -E 'nginx-1$'        | head -1 || true)
     for c in ${_vc:-splice-validator-validator-1} ${_pc:-splice-validator-participant-1} ${_nc:-splice-validator-nginx-1}; do
         local running health
         running=$(docker inspect --format='{{.State.Running}}' "$c" 2>/dev/null || echo "false")
@@ -2170,7 +2170,7 @@ install_monitoring() {
     local net_name
     net_name=$(docker network ls --format '{{.Name}}' \
         | grep '_splice_validator$' | head -1 \
-        | sed 's/_splice_validator$//')
+        | sed 's/_splice_validator$//' || true)
     if [ -z "$net_name" ]; then
         net_name="${CANTON_NETWORK_NAME:-splice-validator}"
         warn "Could not auto-detect network name, using: $net_name"
