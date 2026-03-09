@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ============================================================
 # Canton Validator Toolkit — backup.sh
-# Backs up validator + participant PostgreSQL DBs
+# Backs up validator + participant PostgreSQL DBs + identity
 # Supports: rsync (SSH) | r2 (Cloudflare R2 via rclone)
 # ============================================================
 
@@ -87,7 +87,7 @@ send_alert() {
 }
 
 # ============================================================
-# Backup state machine — alert on failure, recovery on fix, silent on success
+# Backup state machine
 # ============================================================
 _backup_alert_failure() {
     local reason="$1"
@@ -127,13 +127,98 @@ Time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 }
 
 # ============================================================
-# Detect postgres container
+# Detect containers
 # ============================================================
 get_postgres_container() {
-    local container
-    container=$(docker ps --format '{{.Names}}' 2>/dev/null \
-        | grep -E 'postgres-splice' | head -1)
-    echo "$container"
+    docker ps --format '{{.Names}}' 2>/dev/null \
+        | grep -E 'postgres-splice' | head -1
+}
+
+get_participant_container() {
+    docker ps --format '{{.Names}}' 2>/dev/null \
+        | grep -E 'participant-1' | head -1
+}
+
+get_validator_container() {
+    docker ps --format '{{.Names}}' 2>/dev/null \
+        | grep -E 'splice-validator-validator-1' | head -1
+}
+
+# ============================================================
+# Verify gzipped dump integrity
+# ============================================================
+verify_dump() {
+    local file="$1"
+    local label="$2"
+
+    if [ ! -f "$file" ]; then
+        die "Dump file missing: $file"
+    fi
+
+    local size
+    size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo "0")
+    if [ "$size" -lt 100 ]; then
+        die "${label} dump too small (${size} bytes) — likely empty or failed"
+    fi
+
+    if ! gzip -t "$file" 2>/dev/null; then
+        die "${label} dump is corrupt (gzip integrity check failed)"
+    fi
+
+    local line_count
+    line_count=$(zcat "$file" 2>/dev/null | head -20 | grep -c "PostgreSQL database dump" || true)
+    if [ "$line_count" -lt 1 ]; then
+        die "${label} dump does not contain a valid pg_dump header"
+    fi
+
+    success "${label} integrity OK ($(du -sh "$file" | cut -f1))"
+}
+
+# ============================================================
+# Identity backup (crypto keys + node ID)
+# ============================================================
+dump_identity() {
+    local pg_container="$1"
+    local participant_db="$2"
+    local identity_file="$BACKUP_DIR/identity_${DATE}.sql.gz"
+
+    log "Dumping identity (node_id + crypto keys + settings)..."
+
+    local dump_output
+    dump_output=$(docker exec "$pg_container" pg_dump -U cnadmin -d "$participant_db" \
+        --schema=participant \
+        -t participant.common_node_id \
+        -t participant.common_crypto_private_keys \
+        -t participant.common_crypto_public_keys \
+        -t participant.common_kms_metadata_store \
+        -t participant.par_settings \
+        --data-only --inserts 2>&1) || die "pg_dump failed for identity tables"
+
+    local row_count
+    row_count=$(echo "$dump_output" | grep -c "^INSERT" || true)
+    if [ "$row_count" -lt 3 ]; then
+        die "Identity dump has only $row_count rows — expected at least 3 (node_id + keys)"
+    fi
+
+    echo "$dump_output" | gzip > "$identity_file"
+    verify_dump "$identity_file" "Identity"
+
+    IDENTITY_DUMP="$identity_file"
+
+    local identity_json="$BACKUP_DIR/identity_${DATE}.json"
+    local node_uid
+    node_uid=$(docker exec "$pg_container" psql -U cnadmin -d "$participant_db" -t -A \
+        -c "SELECT identifier || '::' || namespace FROM participant.common_node_id LIMIT 1;" 2>/dev/null || echo "unknown")
+
+    local key_count
+    key_count=$(docker exec "$pg_container" psql -U cnadmin -d "$participant_db" -t -A \
+        -c "SELECT count(*) FROM participant.common_crypto_private_keys;" 2>/dev/null || echo "0")
+
+    printf '{"timestamp":"%s","node_uid":"%s","private_keys":%s,"network":"%s"}\n' \
+        "$DATE" "$node_uid" "$key_count" "$NETWORK" > "$identity_json"
+
+    success "Identity: $node_uid ($key_count private keys)"
+    IDENTITY_JSON="$identity_json"
 }
 
 # ============================================================
@@ -150,32 +235,40 @@ dump_databases() {
     log "PostgreSQL container: $pg_container"
     mkdir -p "$BACKUP_DIR"
 
-    # Validator DB
-    log "Dumping validator DB..."
-    if ! docker exec "$pg_container" pg_dump -U cnadmin validator \
-        | gzip > "$BACKUP_DIR/validator_${DATE}.sql.gz"; then
-        die "pg_dump failed for validator DB"
-    fi
-    success "validator_${DATE}.sql.gz — $(du -sh "$BACKUP_DIR/validator_${DATE}.sql.gz" | cut -f1)"
+    local participant_container
+    participant_container=$(get_participant_container)
+    local participant_db=""
 
-    # Participant DB — detect name from running container env
-    local participant_db
-    local PARTICIPANT_CONTAINER=$(docker ps --format "{{.Names}}" | grep "participant-1" | head -1)
-    participant_db=$(docker exec "$PARTICIPANT_CONTAINER" \
-        bash -c 'echo $CANTON_PARTICIPANT_POSTGRES_DB' 2>/dev/null || echo "")
+    if [ -n "$participant_container" ]; then
+        participant_db=$(docker exec "$participant_container" \
+            bash -c 'echo $CANTON_PARTICIPANT_POSTGRES_DB' 2>/dev/null || echo "")
+    fi
+
+    if [ -z "$participant_db" ]; then
+        participant_db=$(docker exec "$pg_container" psql -U cnadmin -t -A \
+            -c "SELECT datname FROM pg_database WHERE datname LIKE 'participant%' ORDER BY datname DESC LIMIT 1;" 2>/dev/null || echo "")
+    fi
 
     if [ -z "$participant_db" ]; then
         warn "Could not detect participant DB name, trying 'participant_0'..."
         participant_db="participant_0"
     fi
 
+    log "Participant DB: $participant_db"
+
+    dump_identity "$pg_container" "$participant_db"
+
+    log "Dumping validator DB..."
+    docker exec "$pg_container" pg_dump -U cnadmin validator \
+        | gzip > "$BACKUP_DIR/validator_${DATE}.sql.gz" \
+        || die "pg_dump failed for validator DB"
+    verify_dump "$BACKUP_DIR/validator_${DATE}.sql.gz" "Validator"
+
     log "Dumping participant DB ($participant_db)..."
-    if ! docker exec "$pg_container" pg_dump -U cnadmin "$participant_db" \
-        | gzip > "$BACKUP_DIR/${participant_db}_${DATE}.sql.gz"; then
-        warn "pg_dump failed for participant DB — continuing without it"
-    else
-        success "${participant_db}_${DATE}.sql.gz — $(du -sh "$BACKUP_DIR/${participant_db}_${DATE}.sql.gz" | cut -f1)"
-    fi
+    docker exec "$pg_container" pg_dump -U cnadmin "$participant_db" \
+        | gzip > "$BACKUP_DIR/${participant_db}_${DATE}.sql.gz" \
+        || die "pg_dump failed for participant DB"
+    verify_dump "$BACKUP_DIR/${participant_db}_${DATE}.sql.gz" "Participant"
 
     VALIDATOR_DUMP="$BACKUP_DIR/validator_${DATE}.sql.gz"
     PARTICIPANT_DUMP="$BACKUP_DIR/${participant_db}_${DATE}.sql.gz"
@@ -189,27 +282,30 @@ upload_rsync() {
         die "REMOTE_HOST not set in toolkit.conf"
     fi
 
-    # Expand ~ to absolute path on remote (in case old config stored ~/...)
     local remote_user
     remote_user=$(echo "$REMOTE_HOST" | cut -d@ -f1)
     REMOTE_PATH="${REMOTE_PATH/#\~//home/${remote_user}}"
 
     log "Syncing to $REMOTE_HOST:$REMOTE_PATH ..."
 
-    # Ensure remote dir exists
     ssh -o BatchMode=yes -o ConnectTimeout=10 "$REMOTE_HOST" \
         "mkdir -p $REMOTE_PATH" 2>/dev/null \
         || die "Cannot connect to $REMOTE_HOST — check SSH key"
 
+    local files_to_sync=("$VALIDATOR_DUMP")
+    [ -f "$PARTICIPANT_DUMP" ] && files_to_sync+=("$PARTICIPANT_DUMP")
+    [ -f "$IDENTITY_DUMP" ] && files_to_sync+=("$IDENTITY_DUMP")
+    [ -f "$IDENTITY_JSON" ] && files_to_sync+=("$IDENTITY_JSON")
+
     rsync -az --no-perms \
-        "$VALIDATOR_DUMP" \
-        $([ -f "$PARTICIPANT_DUMP" ] && echo "$PARTICIPANT_DUMP" || echo "") \
+        "${files_to_sync[@]}" \
         "${REMOTE_HOST}:${REMOTE_PATH}/" \
         || die "rsync failed"
 
-    # Cleanup old remote backups
     ssh -o BatchMode=yes "$REMOTE_HOST" \
-        "find $REMOTE_PATH -name '*.sql.gz' -mtime +${RETENTION_DAYS} -delete 2>/dev/null; echo 'remote cleanup done'" \
+        "find $REMOTE_PATH -name '*.sql.gz' -mtime +${RETENTION_DAYS} -delete 2>/dev/null; \
+         find $REMOTE_PATH -name 'identity_*.json' -mtime +${RETENTION_DAYS} -delete 2>/dev/null; \
+         echo 'remote cleanup done'" \
         || warn "Remote cleanup failed (non-fatal)"
 
     success "rsync upload complete"
@@ -226,11 +322,9 @@ setup_rclone_r2() {
             || die "Cannot install rclone"
     fi
 
-    # Write rclone config for R2
     local rclone_conf="$HOME/.config/rclone/rclone.conf"
     mkdir -p "$(dirname "$rclone_conf")"
 
-    # Remove old canton-r2 section if exists
     if [ -f "$rclone_conf" ]; then
         python3 - "$rclone_conf" <<'PYEOF'
 import sys, re
@@ -262,11 +356,23 @@ upload_r2() {
             || warn "rclone upload failed for participant dump (non-fatal)"
     fi
 
-    # Cleanup old R2 backups (files older than RETENTION_DAYS)
+    if [ -f "$IDENTITY_DUMP" ]; then
+        rclone copy "$IDENTITY_DUMP" "$remote_path/" \
+            || warn "rclone upload failed for identity dump (non-fatal)"
+    fi
+
+    if [ -f "$IDENTITY_JSON" ]; then
+        rclone copy "$IDENTITY_JSON" "$remote_path/" \
+            || warn "rclone upload failed for identity json (non-fatal)"
+    fi
+
     log "Cleaning up R2 backups older than ${RETENTION_DAYS} days..."
     rclone delete "$remote_path/" \
         --min-age "${RETENTION_DAYS}d" \
         --include '*.sql.gz' 2>/dev/null || warn "R2 cleanup failed (non-fatal)"
+    rclone delete "$remote_path/" \
+        --min-age "${RETENTION_DAYS}d" \
+        --include 'identity_*.json' 2>/dev/null || true
 
     success "R2 upload complete"
 }
@@ -277,10 +383,11 @@ upload_r2() {
 cleanup_local() {
     log "Cleaning up local backups older than ${RETENTION_DAYS} days..."
     find "$BACKUP_DIR" -name '*.sql.gz' -mtime "+${RETENTION_DAYS}" -delete 2>/dev/null || true
+    find "$BACKUP_DIR" -name 'identity_*.json' -mtime "+${RETENTION_DAYS}" -delete 2>/dev/null || true
     success "Local cleanup done"
 
     log "Current local backups:"
-    ls -lh "$BACKUP_DIR"/*.sql.gz 2>/dev/null || echo "  (none)"
+    ls -lh "$BACKUP_DIR"/*.sql.gz "$BACKUP_DIR"/identity_*.json 2>/dev/null || echo "  (none)"
 }
 
 # ============================================================
@@ -289,12 +396,14 @@ cleanup_local() {
 main() {
     log "Starting backup — network: $NETWORK, type: $BACKUP_TYPE"
 
-    if [ "$BACKUP_TYPE" = "skip" ]; then
-        log "Backup type is 'skip', exiting"
-        exit 0
-    fi
-
     dump_databases
+
+    if [ "$BACKUP_TYPE" = "skip" ]; then
+        log "Upload skipped (type=skip) — local dumps saved"
+        cleanup_local
+        success "Local backup completed (no remote upload)"
+        return 0
+    fi
 
     case "$BACKUP_TYPE" in
         rsync) upload_rsync ;;

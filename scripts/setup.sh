@@ -565,6 +565,13 @@ import_existing_config() {
     main_menu
 }
 
+build_start_args() {
+    local args="-s $SV_URL -c $SCAN_URL -p $PARTY_HINT -m $MIGRATION_ID"
+    local onboarding_secret="${ONBOARDING_SECRET:-}"
+    args="$args -o \"$onboarding_secret\" -w"
+    echo "$args"
+}
+
 version_gte() {
     [ "$(printf '%s\n%s' "$1" "$2" | sort -V | tail -1)" = "$1" ]
 }
@@ -1751,7 +1758,7 @@ mode_update() {
     local backup_choice
     read -rp "$(echo -e "${BOLD}Run backup before upgrade? [Y/n]${NC}: ")" backup_choice
     if [[ ! "$backup_choice" =~ ^[Nn]$ ]]; then
-        if [ -f "$TOOLKIT_DIR/scripts/backup.sh" ] && [ "$BACKUP_TYPE" != "skip" ]; then
+        if [ -f "$TOOLKIT_DIR/scripts/backup.sh" ]; then
             log "Running backup..."
             bash "$TOOLKIT_DIR/scripts/backup.sh" || {
                 echo ""
@@ -1760,7 +1767,7 @@ mode_update() {
                 [[ "$skip_choice" =~ ^[Yy]$ ]] || die "Upgrade aborted"
             }
         else
-            warn "Backup skipped (type=skip or backup.sh not found)"
+            warn "Backup skipped (backup.sh not found)"
         fi
     fi
 
@@ -1830,8 +1837,8 @@ do_upgrade() {
     cd "$new_dir"
     export IMAGE_TAG="$new_version"
 
-    local onboarding_secret="${ONBOARDING_SECRET:-}"
-    local start_args="-s $SV_URL -c $SCAN_URL -p $PARTY_HINT -m $MIGRATION_ID -o \"$onboarding_secret\" -w"
+    local start_args
+    start_args=$(build_start_args)
 
     if ! eval ./start.sh $start_args; then
         error "Start failed — attempting rollback to $old_version"
@@ -1901,8 +1908,8 @@ _rollback() {
     cd "$dir"
     export IMAGE_TAG="$version"
 
-    local onboarding_secret="${ONBOARDING_SECRET:-}"
-    local start_args="-s $SV_URL -c $SCAN_URL -p $PARTY_HINT -m $MIGRATION_ID -o \"$onboarding_secret\" -w"
+    local start_args
+    start_args=$(build_start_args)
 
     if eval ./start.sh $start_args; then
         send_telegram "🔙 <b>${NODE_NAME:-Canton}</b>%0ARolled back to ${version} successfully"
@@ -2214,8 +2221,8 @@ start_validator() {
     cd "$validator_dir"
     export IMAGE_TAG="$version"
 
-    local onboarding_secret="${ONBOARDING_SECRET:-}"
-    local start_args="-s $SV_URL -c $SCAN_URL -p $PARTY_HINT -m $MIGRATION_ID -o \"$onboarding_secret\" -w"
+    local start_args
+    start_args=$(build_start_args)
 
     if ! eval ./start.sh $start_args; then
         if docker info &>/dev/null; then

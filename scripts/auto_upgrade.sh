@@ -40,6 +40,13 @@ WAIT_HOURS="${WAIT_HOURS:-12}"
 AUTO_UPGRADE="${AUTO_UPGRADE:-false}"
 TOOLKIT_DIR="${TOOLKIT_DIR:-$HOME/canton-validator-toolkit}"
 
+build_start_args() {
+    local args="-s $SV_URL -c $SCAN_URL -p $PARTY_HINT -m $MIGRATION_ID"
+    local onboarding_secret="${ONBOARDING_SECRET:-}"
+    args="$args -o \"$onboarding_secret\" -w"
+    echo "$args"
+}
+
 # AUTO_UPGRADE guard — default is false, must be explicitly enabled
 if [ "$AUTO_UPGRADE" != "true" ]; then
     log "Auto-upgrade is disabled (AUTO_UPGRADE=false in toolkit.conf)"
@@ -349,8 +356,8 @@ start_new() {
     cd "$validator_dir"
     export IMAGE_TAG="$version"
 
-    local onboarding_secret="${ONBOARDING_SECRET:-}"
-    local start_args="-s $SV_URL -c $SCAN_URL -p $PARTY_HINT -m $MIGRATION_ID -o \"$onboarding_secret\" -w"
+    local start_args
+    start_args=$(build_start_args)
 
     if ! eval ./start.sh $start_args; then
         return 1
