@@ -408,10 +408,10 @@ import_existing_config() {
     env_file=$(find "$HOME/.canton" -maxdepth 7 -name ".env" 2>/dev/null \
         | grep -v 'current/' | sort -r | head -1 || true)
     if [ -n "$env_file" ]; then
-        detected_party=$(grep     '^PARTY_HINT='         "$env_file" 2>/dev/null | cut -d= -f2 || true)
-        detected_sv=$(grep        '^SPONSOR_SV_ADDRESS=' "$env_file" 2>/dev/null | cut -d= -f2 || true)
-        detected_scan=$(grep      '^SCAN_ADDRESS='       "$env_file" 2>/dev/null | cut -d= -f2 || true)
-        detected_migration=$(grep '^MIGRATION_ID='       "$env_file" 2>/dev/null | cut -d= -f2 || true)
+        detected_party=$(grep     '^PARTY_HINT='         "$env_file" 2>/dev/null | cut -d= -f2- | grep -v '^$' | tail -1 | tr -d '\r' || true)
+        detected_sv=$(grep        '^SPONSOR_SV_ADDRESS=' "$env_file" 2>/dev/null | cut -d= -f2- | grep -v '^$' | tail -1 | tr -d '\r' || true)
+        detected_scan=$(grep      '^SCAN_ADDRESS='       "$env_file" 2>/dev/null | cut -d= -f2- | grep -v '^$' | tail -1 | tr -d '\r' || true)
+        detected_migration=$(grep '^MIGRATION_ID='       "$env_file" 2>/dev/null | cut -d= -f2- | grep -v '^$' | tail -1 | tr -d '\r' || true)
     fi
 
     # Detect network — check SV URL, container names, and .canton bundle path
@@ -2124,42 +2124,42 @@ save_toolkit_conf() {
 # Written by setup.sh on $(date -u '+%Y-%m-%d %H:%M:%S UTC')
 
 # ── Validator ─────────────────────────────────
-NETWORK=${NETWORK}
-VERSION=${version}
-PARTY_HINT=${PARTY_HINT}
-MIGRATION_ID=${MIGRATION_ID}
-SV_URL=${SV_URL}
-SCAN_URL=${SCAN_URL}
-NODE_NAME=${NODE_NAME}
-CANTON_NETWORK_NAME=${CANTON_NETWORK_NAME:-splice-validator}
+NETWORK="${NETWORK}"
+VERSION="${version}"
+PARTY_HINT="${PARTY_HINT}"
+MIGRATION_ID="${MIGRATION_ID}"
+SV_URL="${SV_URL}"
+SCAN_URL="${SCAN_URL}"
+NODE_NAME="${NODE_NAME}"
+CANTON_NETWORK_NAME="${CANTON_NETWORK_NAME:-splice-validator}"
 
 # ── Backup ────────────────────────────────────
-BACKUP_TYPE=${BACKUP_TYPE}
-REMOTE_HOST=${REMOTE_HOST:-}
-REMOTE_PATH=${REMOTE_PATH:-}
-R2_BUCKET=${R2_BUCKET:-}
-R2_ACCOUNT_ID=${R2_ACCOUNT_ID:-}
-R2_ACCESS_KEY=${R2_ACCESS_KEY:-}
-R2_SECRET_KEY=${R2_SECRET_KEY:-}
-RETENTION_DAYS=${RETENTION_DAYS}
+BACKUP_TYPE="${BACKUP_TYPE}"
+REMOTE_HOST="${REMOTE_HOST:-}"
+REMOTE_PATH="${REMOTE_PATH:-}"
+R2_BUCKET="${R2_BUCKET:-}"
+R2_ACCOUNT_ID="${R2_ACCOUNT_ID:-}"
+R2_ACCESS_KEY="${R2_ACCESS_KEY:-}"
+R2_SECRET_KEY="${R2_SECRET_KEY:-}"
+RETENTION_DAYS="${RETENTION_DAYS}"
 
 # ── Alerts ────────────────────────────────────
-TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
-SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
-PAGERDUTY_ROUTING_KEY=${PAGERDUTY_ROUTING_KEY:-}
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID:-}"
+DISCORD_WEBHOOK_URL="${DISCORD_WEBHOOK_URL:-}"
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-}"
+PAGERDUTY_ROUTING_KEY="${PAGERDUTY_ROUTING_KEY:-}"
 
 # ── Services & Monitoring ─────────────────────
-AUTO_UPGRADE=${AUTO_UPGRADE:-false}
-WAIT_HOURS=12
-MONITORING=${MONITORING}
-TAILSCALE=${TAILSCALE:-false}
-TAILSCALE_AUTHKEY=${TAILSCALE_AUTHKEY:-}
-TAILSCALE_IP=${TAILSCALE_IP:-}
+AUTO_UPGRADE="${AUTO_UPGRADE:-false}"
+WAIT_HOURS="12"
+MONITORING="${MONITORING}"
+TAILSCALE="${TAILSCALE:-false}"
+TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
+TAILSCALE_IP="${TAILSCALE_IP:-}"
 
 # ── Internal ──────────────────────────────────
-TOOLKIT_DIR=${TOOLKIT_DIR}
+TOOLKIT_DIR="${TOOLKIT_DIR}"
 CONFEOF
     chmod 600 "$TOOLKIT_CONF"
     success "toolkit.conf saved"
