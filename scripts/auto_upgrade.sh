@@ -250,7 +250,7 @@ migrate_config() {
 
     # nginx/ dir (incl. .htpasswd)
     if [ -d "$old_dir/nginx" ]; then
-        cp -r "$old_dir/nginx" "$new_dir/nginx"
+        cp -r "$old_dir/nginx/." "$new_dir/nginx/"
         success "nginx/ dir copied (incl. .htpasswd)"
     fi
 
